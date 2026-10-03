@@ -37,8 +37,27 @@ after acting on the feedback; there's no native gate to invoke afterward.
 - If the user named a file, review that file.
 - Otherwise review the most recent plan in this conversation. If your tool
   already saved it as a markdown file, use that file. If not, write the plan
-  verbatim to a new temp file (`"$(mktemp -d)/plan.md"`). If there is no plan,
-  use your last substantial message.
+  verbatim to a new temp file (`"$(mktemp -d)/<name>.md"`, named as below). If
+  there is no plan, use your last substantial message.
+
+### Name it for the session
+
+The review page and its result line show the file's name, so the name must
+say what this session is working on: 2-5 lowercase words in kebab-case, such
+as `herdr-status-fix.md` or `migrate-auth-to-oauth.md`. Generic or random
+names don't count: `plan.md`, `untitled.md`, or a host's generated slug like
+`cosmic-meandering-pancake.md` or `build-a-plan-sunny-barto.md`.
+
+- A file you write yourself gets that name from the start.
+- A file the user named keeps its name. They chose it.
+- A plan file your host keeps for this conversation (in Claude Code, the one
+  under `~/.claude/plans/`) keeps its path: the host finds the plan there when
+  you exit plan mode, so never rename or move it. If its name isn't relevant,
+  review it through a symlink that has a relevant name:
+  `d=$(mktemp -d) && ln -s <host-file> "$d/<name>.md"`. Pass the symlink to
+  `review`, and make any edits to the host file itself.
+- Keep the same name for every round of review in this session, so the user
+  can tell it's the same plan.
 
 ## 2. Open the review
 
