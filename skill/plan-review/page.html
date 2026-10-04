@@ -85,9 +85,9 @@ const hl = window.Highlight ? new Highlight() : null;
 if (hl) CSS.highlights.set('review', hl);
 let pending = null, sent = false;
 
-const { name, text } = /*PLAN*/;
-document.title = 'Review · ' + name;
-$('#name').textContent = name;
+const { name, title, text } = /*PLAN*/;
+document.title = title || 'Review · ' + name;
+$('#name').textContent = title || name;
 marked.use({ renderer: { html: esc } });
 $('#plan').innerHTML = marked.parse(text);
 

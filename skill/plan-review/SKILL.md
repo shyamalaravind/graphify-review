@@ -42,7 +42,8 @@ after acting on the feedback; there's no native gate to invoke afterward.
 
 ### Name it for the session
 
-The review page and its result line show the file's name, so the name must
+The result line shows the file's name, and so do the review page and its tab
+unless you pass `--title` (step 2). So the name must
 say what this session is working on: 2-5 lowercase words in kebab-case, such
 as `herdr-status-fix.md` or `migrate-auth-to-oauth.md`. Generic or random
 names don't count: `plan.md`, `untitled.md`, or a host's generated slug like
@@ -65,8 +66,12 @@ names don't count: `plan.md`, `untitled.md`, or a host's generated slug like
 skill's directory:
 
 ```
-<this-skill-dir>/review <file>
+<this-skill-dir>/review <file> [--title "<tab title>"]
 ```
+
+`--title` names the browser tab and the page header; without it they show
+the file's name. Pass it whenever the user or the skill that sent you here
+asks for a tab title, exactly as given, and keep it the same every round.
 
 It compiles the server on first use (about a second, once) and from then on
 starts instantly. It opens the browser and blocks until the user submits or

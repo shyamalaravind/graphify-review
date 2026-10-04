@@ -43,3 +43,5 @@ export PLAN_REVIEW_BROWSER=brave-browser     # Linux
 ```
 
 You can also run it without an agent: `skill/plan-review/review plan.md` prints the feedback to stdout.
+
+The browser tab shows the file's name. To name it something else, add `--title`: `review resume.md --title "Apollo.io Resume Senior Software Engineer"`. Another skill that hands its document to plan-review can ask for a title this way.

@@ -501,12 +501,23 @@ static bool open_browser(const std::string &url) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::fprintf(stderr, "usage: review <file.md>\n");
+  // --title names the browser tab and the page header; without it they show the file's name.
+  std::string file, title;
+  bool usage_ok = true;
+  for (int k = 1; k < argc && usage_ok; k++) {
+    std::string arg = argv[k];
+    if (arg == "--title" && k + 1 < argc)
+      title = argv[++k];
+    else if (file.empty() && arg.rfind("--", 0) != 0)
+      file = arg;
+    else
+      usage_ok = false;
+  }
+  if (!usage_ok || file.empty()) {
+    std::fprintf(stderr, "usage: review <file.md> [--title <tab title>]\n");
     return 2;
   }
 
-  std::string file = argv[1];
   std::string plan;
   if (!read_file(file, plan)) {
     std::fprintf(stderr, "review: cannot read %s\n", file.c_str());
@@ -523,7 +534,8 @@ int main(int argc, char **argv) {
   }
   replace_first(page, "/*MARKED*/", marked);
   replace_first(page, "/*PLAN*/",
-                "{\"name\":" + json_string(name) + ",\"text\":" + json_string(plan) + "}");
+                "{\"name\":" + json_string(name) + ",\"title\":" + json_string(title) +
+                    ",\"text\":" + json_string(plan) + "}");
 
   int server = ::socket(AF_INET, SOCK_STREAM, 0);
   if (server < 0) {
