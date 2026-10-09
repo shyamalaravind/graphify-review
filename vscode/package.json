@@ -1,0 +1,26 @@
+{
+  "name": "plan-viewer",
+  "displayName": "Plan Viewer",
+  "description": "Review an agent's plan inside VS Code: its prose and diagrams as one view, where every name hovers and opens like code.",
+  "version": "0.3.0",
+  "publisher": "shyamalaravind",
+  "repository": "https://github.com/shyamalaravind/plan-review",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished", "onUri", "onWebviewPanel:planViewer"],
+  "contributes": {
+    "commands": [
+      { "command": "planViewer.openWaiting", "title": "Plan Review: Open a Waiting Review" },
+      { "command": "planViewer.commentOnSelection", "title": "Plan Review: Comment on Selection" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "planViewer.commentOnSelection", "when": "planViewer.reviewing && editorHasSelection", "group": "9_planViewer" }
+      ],
+      "commandPalette": [
+        { "command": "planViewer.commentOnSelection", "when": "planViewer.reviewing" }
+      ]
+    }
+  }
+}

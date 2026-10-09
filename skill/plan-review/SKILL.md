@@ -16,7 +16,8 @@ plan to the user for a yes/no), run this skill **first** instead of invoking
 that gate right away:
 
 1. Reuse the plan file if your host already keeps one for this conversation —
-   don't rewrite it. Only write a fresh one (see step 1 below) if none
+   don't rewrite it, beyond adding what the plan format asks for if it's
+   missing (step 1). Only write a fresh one (see step 1 below) if none
    exists; that's a one-time cost, not a per-review cost, since the plan text
    is already in context either way.
 2. Open it with this skill (steps 1-2 below) and act on the feedback (step
@@ -60,22 +61,39 @@ names don't count: `plan.md`, `untitled.md`, or a host's generated slug like
 - Keep the same name for every round of review in this session, so the user
   can tell it's the same plan.
 
+### Write it in the plan format
+
+The user reviews a plan that changes code by its diagrams first, and follows
+its names into the code. Read [FORMAT.md](FORMAT.md), next to this file,
+before opening the review: a code-flow flowchart with new and changed nodes
+marked, a description entry per changed node that starts with the node's name,
+and functions and files written as `file: name()` or `path/to/file.ts:42-60`.
+If the plan lacks any of it, add it to the plan file, keeping the rest as it
+is. Plans that don't change code (a resume, a write-up) need none of it.
+
 ## 2. Open the review
 
 `review` sits next to this SKILL.md. Run it with the absolute path to this
 skill's directory:
 
 ```
-<this-skill-dir>/review <file> [--title "<tab title>"]
+<this-skill-dir>/review <file> [--title "<tab title>"] [--root <dir>]
 ```
 
-`--title` names the browser tab and the page header; without it they show
-the file's name. Pass it whenever the user or the skill that sent you here
-asks for a tab title, exactly as given, and keep it the same every round.
+`--title` names the review (the browser tab or editor tab, and the page
+header); without it they show the file's name. Pass it whenever the user or
+the skill that sent you here asks for a tab title, exactly as given, and keep
+it the same every round.
 
-It compiles the server on first use (about a second, once) and from then on
-starts instantly. It opens the browser and blocks until the user submits or
-ends the review. Run it as a background command if your tool supports that,
+Run it from the project the plan is about: that git repository is the code
+an editor viewer opens and looks names up in. If the plan is about code
+somewhere else, pass `--root <dir>`.
+
+It compiles on first use (about a second, once) and from then on starts
+instantly. It opens the user's viewer — the browser, or VS Code when they've
+set that up — and blocks until the user submits or ends the review. Each
+round of the same file is the same session, so a viewer that is still open
+shows the revised plan in place. Run it as a background command if your tool supports that,
 and you'll be notified when it exits. Tell the user in one line that the
 review is open, then stop and don't poll. If background commands aren't
 supported, run it in the foreground with the longest timeout available.
@@ -93,8 +111,17 @@ The command prints one of:
   changed, one line per comment. Don't start implementing; the user will review
   again or approve.
 - `ENDED: ...`: the user ended the review without feedback, by clicking **End
-  review** or by closing the tab. Treat it as an abrupt end with no
+  review** or by closing the review's tab. Treat it as an abrupt end with no
   instructions. Say in at most one short line that the review ended with no
   feedback, and stop. Don't revise the plan, don't start implementing, don't
   guess at what they wanted, and don't ask a follow-up question — wait for them
   to say what's next.
+
+Each comment says what it is about:
+
+- `On: "…"` quotes the plan's prose.
+- `On diagram 2, node "serve() GET session":` is about that node of the plan's
+  second diagram; `On diagram 2: "…"` quotes other text in it, such as an edge
+  label.
+- `On src/a.ts:12-14: "…"` is about those lines of the code, not the plan's
+  text: read them before you answer it.
