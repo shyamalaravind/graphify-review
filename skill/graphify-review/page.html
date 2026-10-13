@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan Review</title>
+<script>/*MARKED*/</script>
+<style>
+:root {
+  --bg: #fbfaf8; --fg: #1f1e1c; --muted: #6b6862; --line: #e4e1db;
+  --panel: #ffffff; --accent: #c2410c; --mark: #fde68a; --code: #f1efea; --hit: #fbeee4;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1a1918; --fg: #ebe9e4; --muted: #9c988f; --line: #33312e;
+    --panel: #222120; --accent: #fb923c; --mark: #715c1c; --code: #2a2927; --hit: #33271d; }
+}
+/* In an editor's webview, its theme decides. */
+body.vscode-light { color-scheme: light; --bg: #fbfaf8; --fg: #1f1e1c; --muted: #6b6862; --line: #e4e1db;
+  --panel: #ffffff; --accent: #c2410c; --mark: #fde68a; --code: #f1efea; --hit: #fbeee4; }
+body.vscode-dark, body.vscode-high-contrast { color-scheme: dark; --bg: #1a1918; --fg: #ebe9e4; --muted: #9c988f;
+  --line: #33312e; --panel: #222120; --accent: #fb923c; --mark: #715c1c; --code: #2a2927; --hit: #33271d; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; background: var(--bg); color: var(--fg);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+/* ---- The canvas: the whole window, moved by dragging, scrolling and zooming. */
+#canvas { position: fixed; inset: 0; overflow: hidden; cursor: grab; touch-action: none;
+  background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 24px 24px; }
+#canvas.panning, body.space #canvas { cursor: grabbing; }
+#canvas.panning * { user-select: none; }
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; display: flex; flex-wrap: wrap;
+  align-items: flex-start; gap: 72px; padding: 72px; }
+.frame { flex: 0 0 auto; background: color-mix(in srgb, var(--bg) 88%, transparent); border: 1px solid var(--line);
+  border-radius: 14px; padding: 20px 24px 24px; }
+.frame h2 { margin: 0 0 16px; font-size: 20px; font-weight: 600; }
+.frame-body { display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
+.prose { flex: 0 0 auto; max-width: 760px; overflow-wrap: anywhere; }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.intro h1 { margin: 0 0 12px; font-size: 26px; line-height: 1.25; }
+.prose a { color: var(--accent); }
+.frame pre, .frame code { background: var(--code); border-radius: 4px; font-size: 13px; }
+.frame pre { padding: 12px; overflow-x: auto; }
+.frame code { padding: 1px 4px; }
+.frame pre code { padding: 0; }
+.frame table { border-collapse: collapse; font-size: 14px; }
+.frame th, .frame td { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
+.name.live { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.diagram .name.live { color: var(--accent) !important; }  /* over Mermaid's label colour */
+::highlight(review) { background: var(--mark); }
+
+/* ---- Diagrams, whose boxes carry their description entries. */
+.diagram svg { display: block; }
+.diagram.pending { white-space: pre-wrap; color: var(--muted); font: 13px/1.5 var(--mono); max-width: 600px; }
+.diagram.broken p { margin: 4px 0 0; color: var(--accent); font-size: 13px; }
+/* Mermaid measures labels while it draws, outside .diagram, so these apply page-wide.
+   A box with a description wraps at a card's width, so Mermaid sizes the box to the wrapped text. */
+foreignObject div:has(> .markdown-node-label) { display: block !important; white-space: normal !important;
+  width: max-content; max-width: 380px !important; }
+.markdown-node-label { white-space: normal; }
+.markdown-node-label p { margin: 0; text-align: left; line-height: 1.45; }
+.markdown-node-label strong:first-child { display: block; text-align: center; font-size: 15px;
+  padding: 2px 0 7px; margin-bottom: 7px; border-bottom: 1px solid var(--line); }
+.markdown-node-label strong:first-child + br { display: none; }  /* the title is a block already */
+.diagram g.node { cursor: default; }
+
+/* ---- What floats over the canvas. */
+#title { position: fixed; top: 12px; left: 16px; z-index: 5; padding: 4px 10px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+#tools { position: fixed; bottom: 14px; left: 16px; z-index: 5; display: flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+#tools button { border: 0; background: none; color: var(--fg); font: inherit; font-size: 14px; padding: 4px 10px;
+  border-radius: 7px; cursor: pointer; }
+#tools button:hover { background: var(--code); }
+#zoomLevel { min-width: 52px; text-align: center; color: var(--muted); font-size: 13px; }
+#hint { margin-left: 8px; padding-right: 8px; color: var(--muted); font-size: 12px; }
+#panel { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; z-index: 6; display: flex; flex-direction: column;
+  gap: 12px; padding: 16px; background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgb(0 0 0 / .12); }
+#panel.closed { display: none; }
+#panel header { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 13px; }
+#reopen { position: fixed; top: 12px; right: 16px; z-index: 5; }
+#reopen[hidden] { display: none; }
+#list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+#empty { color: var(--muted); font-size: 13.5px; }
+.card { position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.card .at { margin: 0 20px 4px 0; color: var(--accent); font: 12px var(--mono); overflow-wrap: anywhere; cursor: pointer; }
+.card blockquote { margin: 0 20px 6px 0; padding-left: 8px; border-left: 3px solid var(--mark);
+  color: var(--muted); font-size: 13px; cursor: pointer;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.x { position: absolute; top: 4px; right: 6px; border: 0; background: none; color: var(--muted); font-size: 18px; cursor: pointer; }
+textarea { width: 100%; resize: vertical; font: inherit; font-size: 14px; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.row { display: flex; gap: 8px; }
+button.btn { flex: 1; padding: 8px; border-radius: 6px; font: inherit; font-size: 14px;
+  cursor: pointer; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.quiet { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px;
+  padding: 2px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+button.quiet:hover { color: var(--fg); }
+#note { color: var(--accent); font-size: 13px; text-align: center; }
+#note:empty { display: none; }
+#add { position: fixed; z-index: 10; padding: 4px 10px; border-radius: 6px; border: 0;
+  background: var(--accent); color: #fff; font-size: 13px; cursor: pointer; box-shadow: 0 2px 8px rgb(0 0 0 / .2); }
+#tip { position: fixed; z-index: 30; max-width: min(640px, calc(100vw - 32px)); max-height: 360px; overflow: auto;
+  padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .25); font-size: 13px; line-height: 1.5; }
+#tip[hidden] { display: none; }
+#tip pre { margin: 4px 0; padding: 8px; overflow-x: auto; background: var(--code); border-radius: 4px; font: 12.5px/1.5 var(--mono); }
+#tip code { font-family: var(--mono); }
+#tip hr { border: 0; border-top: 1px solid var(--line); }
+#tip .where { margin-top: 6px; color: var(--muted); font: 12px var(--mono); }
+#done { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); }
+#done[hidden], #app[hidden] { display: none; }
+#staging { display: none; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div id="canvas"><div id="world"></div></div>
+  <div id="title"></div>
+  <div id="tools">
+    <button id="zoomOut" title="Zoom out (−)">−</button>
+    <span id="zoomLevel">100%</span>
+    <button id="zoomIn" title="Zoom in (+)">+</button>
+    <button id="fit" title="Fit everything (0)">Fit</button>
+    <button id="actual" title="Actual size (1)">100%</button>
+    <span id="hint">Drag empty space or scroll to move · ⌘-scroll or pinch to zoom</span>
+  </div>
+  <button class="btn" id="reopen" hidden>Comments</button>
+  <aside id="panel">
+    <header><span>Review</span><button class="quiet" id="hide">Hide ›</button></header>
+    <div id="empty"></div>
+    <div id="list"></div>
+    <textarea id="general" rows="3" placeholder="General comment (optional)"></textarea>
+    <div class="row">
+      <button class="btn" id="approve">Approve</button>
+      <button class="btn primary" id="send">Request changes</button>
+    </div>
+    <div id="note"></div>
+    <button class="quiet" id="end">End review without feedback</button>
+  </aside>
+</div>
+<p id="done">Loading the plan…</p>
+<div id="staging"></div>
+<button id="add" hidden>Comment</button>
+<div id="tip" hidden></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+marked.use({ renderer: { html: esc } });
+
+// ---- The host: where this page runs and how it reaches the review broker.
+// In a browser tab it talks to the broker that served it. An editor's webview sets
+// window.planHost before this script runs; it can add code navigation as well:
+//   resolve(keys, files) → [bool]  which names exist in the code (files: those the plan mentions)
+//   hover(key)    → {markdown, where} for a name, from the language server
+//   open(key)     → show the definition (or file and line) in the editor
+//   onRevised(fn) → fn(session) when the plan's next round arrives
+//   shown(stats)  → told once the plan is drawn and its names first resolved
+// and it calls window.planPage.comment(anchor) to add a comment on code from the editor.
+const host = window.planHost || {
+  session: () => fetch('session').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+  feedback: body => fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) }).then(r => { if (!r.ok) throw new Error(r.status); }),
+  leave: () => navigator.sendBeacon('feedback',
+    new Blob([JSON.stringify({ verdict: 'end', leaving: true })], { type: 'application/json' })),
+  asset: name => name,
+};
+const navigable = typeof host.resolve === 'function';
+
+let comments = [], pending = null, sent = false, diagrams = [], names = new Map();
+const hl = window.Highlight ? new Highlight() : null;
+if (hl) CSS.highlights.set('review', hl);
+const canvas = $('#canvas'), world = $('#world');
+
+function done(message) {
+  sent = true;
+  $('#app').hidden = true;
+  $('#add').hidden = $('#tip').hidden = true;
+  Object.assign($('#done'), { hidden: false, textContent: message });
+}
+
+// ---- One round of the plan, laid out on the canvas.
+async function show(session) {
+  sent = false;
+  comments = [];
+  hl?.clear();
+  names = new Map();
+  $('#list').replaceChildren();
+  $('#general').value = '';
+  $('#note').textContent = '';
+  $('#empty').hidden = false;
+  $('#empty').textContent = 'Select text, or double-click a box, to comment on it.'
+    + (navigable ? ' Hover a name to see its definition; click it to open the code.' : '');
+  document.title = session.title || 'Review · ' + session.name;
+  $('#title').textContent = (session.title || session.name) + (session.round > 1 ? ' · round ' + session.round : '');
+
+  const staging = $('#staging');
+  staging.innerHTML = marked.parse(session.text);
+  // Leaving the page would end the review, so other links open beside it.
+  for (const a of staging.querySelectorAll('a[href]'))
+    if (!a.getAttribute('href').startsWith('#')) Object.assign(a, { target: '_blank', rel: 'noopener' });
+  diagrams = [...staging.querySelectorAll('pre > code.language-mermaid')].map(code => {
+    const div = Object.assign(document.createElement('div'), { className: 'diagram pending', textContent: code.textContent });
+    code.parentElement.replaceWith(div);
+    return { el: div, source: code.textContent, literals: new Map() };
+  });
+  findNames(staging);
+  describeNodes(staging);
+  world.replaceChildren(...frames(staging));
+  $('#done').hidden = true;
+  $('#app').hidden = false;
+  await drawDiagrams();
+  for (const d of diagrams) if (d.drawn) { findNames(d.el); wrapLiterals(d); }
+  arrange();
+  resolveNames();
+}
+
+// The plan's sections become frames: the text before the first ## is the intro, and each
+// ## section a frame of its diagrams and text in the plan's order, read top to bottom.
+function frames(staging) {
+  const out = [];
+  let body = null;
+  const frame = (heading, cls) => {
+    const f = Object.assign(document.createElement('section'), { className: 'frame ' + cls });
+    body = Object.assign(document.createElement('div'), { className: 'frame-body' });
+    if (heading) f.append(heading);
+    f.append(body);
+    out.push(f);
+  };
+  frame(null, 'intro');
+  for (const el of [...staging.children]) {
+    if (el.localName === 'h2') { frame(el, ''); continue; }
+    if (el.classList.contains('diagram')) { body.append(el); continue; }
+    let prose = body.lastElementChild;
+    if (!prose?.classList.contains('prose')) body.append(prose = Object.assign(document.createElement('div'), { className: 'prose' }));
+    prose.append(el);
+  }
+  return out.filter(f => f.textContent.trim() || f.querySelector('.diagram'));
+}
+
+// ---- Names: the functions, files and lines a plan mentions, which an editor host can
+// resolve to code. `file: name()`, `name()`, `Qualified.name` and `file:12-20`, in prose
+// and in diagram labels; in a code span, also a camelCase or snake_case identifier.
+// A file needs a source extension, so `store.select` stays a name while `page.html` is a file.
+const FILE = String.raw`[\w@.\-/]*\w\.(?:[cm]?[jt]sx?|json|html?|s?css|less|md|mdx|vue|svelte|py|rb|go|rs|java|kt|swift|cs|c|cc|cpp|h|hpp|m|mm|php|sh|zsh|bash|toml|ya?ml|xml|sql|ini|conf|txt|lock|gradle|proto|graphql)\b`;
+const IDENT = String.raw`[A-Za-z_$][\w$]*(?:(?:::|\.|#)[A-Za-z_$][\w$]*)*`;
+const IN_TEXT = new RegExp(String.raw`(${FILE}):\s*(${IDENT})\(\)|(${FILE}):(\d+)(?:-(\d+))?|\b(${IDENT})\(\)`, 'g');
+const WHOLE_CODE = new RegExp(String.raw`^(?:(${FILE}):\s*)?(${IDENT})(\(\))?$`);
+const WHOLE_FILE = new RegExp(String.raw`^(${FILE})(?::(\d+)(?:-(\d+))?)?$`);
+
+function keyOf(m) {
+  if (m[1]) return { file: m[1], name: m[2] };
+  if (m[3]) return { file: m[3], line: +m[4], end: +(m[5] || m[4]) };
+  return { name: m[6] };
+}
+function codeKey(text) {
+  const f = WHOLE_FILE.exec(text.trim());
+  if (f) return f[2] ? { file: f[1], line: +f[2], end: +(f[3] || f[2]) } : { file: f[1] };
+  const m = WHOLE_CODE.exec(text.trim());
+  if (m && (m[1] || m[3] || /[A-Z_.:#]/.test(m[2].slice(1)))) return m[1] ? { file: m[1], name: m[2] } : { name: m[2] };
+  return null;
+}
+function nameSpan(label, key) {
+  const id = JSON.stringify(key);
+  names.set(id, key);
+  const span = Object.assign(document.createElement('span'), { className: 'name', textContent: label });
+  span.dataset.key = id;
+  return span;
+}
+const keyName = key => key.name || key.file;
+
+function findNames(el) {
+  const html = document.body.namespaceURI, walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
+  for (let n; (n = walk.nextNode());) {
+    const p = n.parentElement;
+    if (p.namespaceURI === html && !p.closest('pre, .name, .diagram.pending, .diagram.broken')) nodes.push(n);
+  }
+  for (const node of nodes) {
+    const code = node.parentElement;
+    if (code.localName === 'code' && code.childNodes.length === 1) {
+      const key = codeKey(node.data);
+      if (key) node.replaceWith(nameSpan(node.data, key));
+      continue;
+    }
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of node.data.matchAll(IN_TEXT)) {
+      frag.append(node.data.slice(last, m.index), nameSpan(m[0], keyOf(m)));
+      last = m.index + m[0].length;
+    }
+    if (last) { frag.append(node.data.slice(last)); node.replaceWith(frag); }
+  }
+}
+
+// ---- Descriptions on the diagram. A list item that starts with a box's name is that box's
+// description: it moves into the box, which Mermaid then sizes to hold it, and leaves the text.
+const SHAPE = /\b([A-Za-z_][\w-]*)(\[\[|\[\(|\(\[|\(\(|\{\{|\[|\(|\{)"([^"]*)"(\]\]|\)\]|\]\)|\)\)|\}\}|\]|\)|\})/g;
+const mermaidText = s => s.replace(/#/g, '#35;').replace(/"/g, '#quot;').replace(/</g, '#lt;')
+  .replace(/>/g, '#gt;').replace(/`/g, "'");
+const labelText = label => label.replace(/<br\s*\/?>/gi, '\n').replace(/#(\w+);/g, (m, e) =>
+  ({ quot: '"', lt: '<', gt: '>', amp: '&' })[e] ?? (/^\d+$/.test(e) ? String.fromCharCode(+e) : m));
+
+// An entry as the text Mermaid's markdown labels take: bold kept, code spans as plain
+// text, nested items as bullet lines.
+function entryText(li, skip) {
+  const out = [];
+  const walk = (node, depth) => {
+    for (const c of node.childNodes) {
+      if (c === skip) continue;
+      if (c.nodeType === 3) out.push(c.data.replace(/\s+/g, ' '));
+      else if (c.localName === 'ul' || c.localName === 'ol')
+        for (const item of c.children) { out.push('\n' + '  '.repeat(depth) + '• '); walk(item, depth + 1); }
+      else if (c.localName === 'br' || c.localName === 'p') { if (c.localName === 'p' && out.length) out.push('\n'); walk(c, depth); }
+      else if (c.localName === 'strong' || c.localName === 'b') { out.push('**'); walk(c, depth); out.push('**'); }
+      else walk(c, depth);
+    }
+  };
+  walk(li, 1);
+  // "(path:12-20): what changes" reads better with the path on its own line.
+  return out.join('').trim().replace(/^\(([^)]+)\)\s*:\s*/, '$1\n').replace(/\*\*\*\*/g, '').replace(/ *\n */g, '\n');
+}
+
+function describeNodes(staging) {
+  const entries = new Map();
+  for (const li of staging.querySelectorAll('li')) {
+    if (li.closest('.diagram')) continue;
+    const first = li.querySelector('.name');
+    if (first && li.textContent.trim().startsWith(first.textContent.trim())) {
+      const k = keyName(names.get(first.dataset.key));
+      if (!entries.has(k)) entries.set(k, li);
+    }
+  }
+  const used = new Set();
+  for (const d of diagrams) {
+    if (!/^\s*(flowchart|graph)\b/.test(d.source)) continue;
+    const seen = new Set();
+    d.source = d.source.replace(SHAPE, (whole, id, open, label, close) => {
+      if (seen.has(id)) return whole;
+      seen.add(id);
+      const title = labelText(label).split('\n')[0];
+      const m = [...title.matchAll(IN_TEXT)][0];
+      const li = m && entries.get(keyName(keyOf(m)));
+      if (!li) return whole;
+      used.add(li);
+      // The entry's leading name is the box's title already.
+      const lead = li.querySelector('.name');
+      const skip = lead.closest('strong, b') && lead.closest('li') === li ? lead.closest('strong, b') : lead;
+      for (const s of li.querySelectorAll('.name')) d.literals.set(s.textContent, s.dataset.key);
+      const rest = labelText(label).split('\n').slice(1).join('\n');
+      const body = [rest, entryText(li, skip)].filter(Boolean).join('\n');
+      return `${id}${open}"\`**${mermaidText(title)}**\n${mermaidText(body)}\`"${close}`;
+    });
+  }
+  for (const li of used) {
+    const list = li.parentElement;
+    li.remove();
+    if (!list.children.length) list.remove();
+  }
+}
+
+// Names from a box's description, found again in the drawn box by their text.
+function wrapLiterals(d) {
+  if (!d.literals.size) return;
+  const labels = [...d.literals.keys()].sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(labels.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  const walk = document.createTreeWalker(d.el, NodeFilter.SHOW_TEXT), nodes = [];
+  for (let n; (n = walk.nextNode());)
+    if (n.parentElement.closest('.markdown-node-label') && !n.parentElement.closest('.name')) nodes.push(n);
+  for (const node of nodes) {
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of node.data.matchAll(pattern)) {
+      frag.append(node.data.slice(last, m.index), nameSpan(m[0], names.get(d.literals.get(m[0]))));
+      last = m.index + m[0].length;
+    }
+    if (last) { frag.append(node.data.slice(last)); node.replaceWith(frag); }
+  }
+}
+
+// Asks the host which names exist, with the files the plan mentions as places to look
+// first. The language servers may still be starting, so names that don't resolve yet are
+// asked again a little later.
+async function resolveNames() {
+  if (!navigable) return;
+  const files = [...new Set([...names.values()].filter(k => k.file).map(k => k.file))];
+  for (const wait of [0, 3000, 10000, 30000]) {
+    const ids = [...names.keys()].filter(id => !document.querySelector(`.name.live[data-key="${CSS.escape(id)}"]`));
+    if (!ids.length) return;
+    if (wait) await new Promise(r => setTimeout(r, wait));
+    let live;
+    try { live = await host.resolve(ids.map(id => names.get(id)), files); } catch { return; }
+    ids.forEach((id, i) => {
+      if (live[i]) for (const s of document.querySelectorAll(`.name[data-key="${CSS.escape(id)}"]`)) s.classList.add('live');
+    });
+    if (!wait) host.shown?.({ names: names.size, live: document.querySelectorAll('.name.live').length,
+      diagrams: diagrams.filter(d => d.drawn).length,
+      described: document.querySelectorAll('.diagram .markdown-node-label strong:first-child').length });
+  }
+}
+
+// ---- Hovering a live name shows the language server's hover; clicking opens the code.
+const hovers = new Map();
+let tipFor = null, tipTimer = 0;
+const tip = $('#tip');
+function hideTip() { clearTimeout(tipTimer); tipTimer = setTimeout(() => { tip.hidden = true; tipFor = null; }, 200); }
+document.addEventListener('mouseover', e => {
+  const name = e.target.closest?.('.name.live');
+  if (e.target.closest?.('#tip')) { clearTimeout(tipTimer); return; }
+  if (!name || drag) { if (tipFor) hideTip(); return; }
+  if (name === tipFor) { clearTimeout(tipTimer); return; }
+  clearTimeout(tipTimer);
+  tipTimer = setTimeout(async () => {
+    tipFor = name;
+    const id = name.dataset.key;
+    if (!hovers.has(id)) {
+      tip.textContent = 'Loading…';
+      place(name);
+      hovers.set(id, host.hover(names.get(id)).catch(() => null));
+    }
+    const h = await hovers.get(id);
+    if (tipFor !== name) return;
+    tip.innerHTML = (h?.markdown ? marked.parse(h.markdown) : h?.where ? '' : '<p>No hover for this name.</p>')
+      + (h?.where ? '<div class="where"></div>' : '');
+    if (h?.where) tip.querySelector('.where').textContent = h.where;
+    place(name);
+  }, 350);
+});
+function place(el) {
+  tip.hidden = false;
+  const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+  const below = r.bottom + 6 + h < innerHeight || r.top < h + 6;
+  tip.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 16)) + 'px';
+  tip.style.top = (below ? r.bottom + 6 : r.top - h - 6) + 'px';
+}
+document.addEventListener('click', e => {
+  const name = e.target.closest?.('.name.live');
+  if (!name || !getSelection().isCollapsed) return;
+  e.preventDefault();
+  e.stopPropagation();
+  tip.hidden = true;
+  host.open(names.get(name.dataset.key));
+}, true);
+
+// ---- Diagrams: ```mermaid blocks, drawn in the page's colours. A diagram that won't
+// parse keeps its source and says why.
+let mermaidReady = null;
+function loadMermaid() {
+  mermaidReady ??= new Promise((ok, fail) => document.head.append(Object.assign(
+    document.createElement('script'), { src: host.asset('mermaid.min.js'), onload: ok, onerror: fail })))
+    .then(() => {
+      const css = getComputedStyle(document.body), v = name => css.getPropertyValue(name).trim();
+      const wide = { useMaxWidth: false };
+      const dark = document.body.matches('.vscode-dark, .vscode-high-contrast')
+        || (!document.body.matches('.vscode-light') && matchMedia('(prefers-color-scheme: dark)').matches);
+      mermaid.initialize({
+        startOnLoad: false, securityLevel: 'strict', theme: 'base', fontFamily: css.fontFamily,
+        flowchart: { ...wide, wrappingWidth: 340 }, sequence: wide, class: wide, state: wide, er: wide,
+        themeVariables: {
+          darkMode: dark, fontSize: '14px',
+          background: v('--bg'), primaryColor: v('--panel'), primaryTextColor: v('--fg'),
+          primaryBorderColor: v('--accent'), lineColor: v('--muted'), secondaryColor: v('--code'),
+          tertiaryColor: v('--code'), clusterBkg: v('--code'), clusterBorder: v('--line'),
+          edgeLabelBackground: v('--bg'), noteBkgColor: v('--code'), noteTextColor: v('--fg'),
+          noteBorderColor: v('--line'), actorBkg: v('--panel'), actorBorder: v('--accent'),
+          actorTextColor: v('--fg'), signalColor: v('--muted'), signalTextColor: v('--fg'),
+        },
+      });
+    });
+  return mermaidReady;
+}
+async function drawDiagrams() {
+  if (!diagrams.length) return;
+  const failed = (d, why) => {
+    d.el.className = 'diagram broken';
+    d.el.replaceChildren(Object.assign(document.createElement('pre'), { textContent: d.source }),
+      Object.assign(document.createElement('p'), { textContent: 'This diagram didn’t draw: ' + why }));
+  };
+  try { await loadMermaid(); } catch {
+    diagrams.forEach(d => failed(d, 'Mermaid could not be loaded.'));
+    return;
+  }
+  for (const [i, d] of diagrams.entries()) {
+    try {
+      d.el.innerHTML = (await mermaid.render('diagram-' + i + '-' + Date.now(), d.source)).svg;
+      d.el.className = 'diagram';
+      d.drawn = true;
+    } catch (e) {
+      document.querySelectorAll('[id^="ddiagram-' + i + '-"]').forEach(el => el.remove());  // Mermaid's error drawing
+      failed(d, String(e.message || e).split('\n')[0]);
+    }
+  }
+}
+
+// ---- Moving around: drag empty space (or hold Space and drag anywhere), scroll to pan,
+// ⌘- or Ctrl-scroll and pinch to zoom at the pointer.
+const view = { x: 0, y: 0, k: 1 };
+let drag = null, space = false;
+function apply() {
+  world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
+  canvas.style.backgroundPosition = `${view.x}px ${view.y}px`;
+  canvas.style.backgroundSize = `${24 * view.k}px ${24 * view.k}px`;
+  $('#zoomLevel').textContent = Math.round(view.k * 100) + '%';
+  $('#add').hidden = true;
+}
+function zoomAt(k, cx, cy) {
+  k = Math.min(3, Math.max(0.1, k));
+  const wx = (cx - view.x) / view.k, wy = (cy - view.y) / view.k;
+  Object.assign(view, { k, x: cx - wx * k, y: cy - wy * k });
+  apply();
+}
+const visible = () => ({ w: innerWidth - ($('#panel').classList.contains('closed') ? 0 : 340), h: innerHeight });
+function fit() {
+  const { w, h } = visible();
+  const k = Math.min(1, (w - 48) / world.offsetWidth, (h - 48) / world.offsetHeight);
+  Object.assign(view, { k, x: (w - world.offsetWidth * k) / 2, y: Math.max(8, (h - world.offsetHeight * k) / 2) });
+  apply();
+}
+// Brings an element into the middle of what's visible, at the current zoom.
+function focusOn(el) {
+  const r = el.getBoundingClientRect(), { w, h } = visible();
+  view.x += w / 2 - (r.left + r.width / 2);
+  view.y += h / 2 - (r.top + r.height / 2);
+  apply();
+}
+// The frames wrap like words in a paragraph, as wide as the widest of them or the window.
+function arrange() {
+  world.style.width = '';
+  const frames = [...world.children];
+  const widest = Math.max(...frames.map(f => f.offsetWidth), 0);
+  world.style.width = Math.max(visible().w * 1.4, widest + 144) + 'px';
+  const fitK = Math.min(1, (visible().w - 48) / world.offsetWidth);
+  Object.assign(view, { k: Math.max(0.6, fitK), x: 0, y: 24 });
+  apply();
+}
+
+const TEXTY = 'p, li, td, th, h1, h2, h3, h4, pre, code, blockquote, .nodeLabel, .edgeLabel, .name, a, button';
+canvas.addEventListener('pointerdown', e => {
+  if (e.button !== 0 && e.button !== 1) return;
+  if (e.button === 0 && !space && e.target.closest(TEXTY)) return;  // text: select it, or click a name
+  drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('panning');
+  tip.hidden = true;
+  e.preventDefault();
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  view.x = drag.vx + e.clientX - drag.x;
+  view.y = drag.vy + e.clientY - drag.y;
+  apply();
+});
+const stopDrag = () => { drag = null; canvas.classList.remove('panning'); };
+canvas.addEventListener('pointerup', stopDrag);
+canvas.addEventListener('pointercancel', stopDrag);
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) zoomAt(view.k * Math.exp(-Math.max(-60, Math.min(60, e.deltaY)) * 0.01), e.clientX, e.clientY);
+  else { view.x -= e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX; view.y -= e.shiftKey && !e.deltaX ? 0 : e.deltaY; apply(); }
+}, { passive: false });
+const typing = e => e.target.closest?.('textarea, input');
+addEventListener('keydown', e => {
+  if (typing(e)) return;
+  if (e.key === ' ') { space = true; document.body.classList.add('space'); e.preventDefault(); }
+  else if (e.key === '+' || e.key === '=') zoomAt(view.k * 1.2, visible().w / 2, innerHeight / 2);
+  else if (e.key === '-') zoomAt(view.k / 1.2, visible().w / 2, innerHeight / 2);
+  else if (e.key === '0') fit();
+  else if (e.key === '1') zoomAt(1, visible().w / 2, innerHeight / 2);
+  else if (e.key === 'Escape') tip.hidden = true;
+});
+addEventListener('keyup', e => { if (e.key === ' ') { space = false; document.body.classList.remove('space'); } });
+$('#zoomIn').onclick = () => zoomAt(view.k * 1.2, visible().w / 2, innerHeight / 2);
+$('#zoomOut').onclick = () => zoomAt(view.k / 1.2, visible().w / 2, innerHeight / 2);
+$('#fit').onclick = fit;
+$('#actual').onclick = () => zoomAt(1, visible().w / 2, innerHeight / 2);
+$('#hide').onclick = () => { $('#panel').classList.add('closed'); $('#reopen').hidden = false; };
+$('#reopen').onclick = () => { $('#panel').classList.remove('closed'); $('#reopen').hidden = true; };
+
+// ---- Comments, anchored to what they are about: prose they quote, a diagram (and the
+// box in it), or lines of code the editor host sends.
+const nodeTitle = g => (g.querySelector('.markdown-node-label strong')?.innerText
+  ?? g.querySelector('foreignObject div')?.innerText ?? g.textContent).replace(/\s+/g, ' ').trim();
+function anchorOf(range, quote) {
+  const ends = [range.startContainer, range.endContainer].map(n => (n.nodeType === 1 ? n : n.parentElement));
+  const where = ends.map(el => diagrams.findIndex(d => d.el.contains(el)));
+  if (where[0] < 0 || where[0] !== where[1]) return { kind: 'quote', quote };
+  const nodes = ends.map(el => el.closest('g.node'));
+  const node = nodes[0] && nodes[0] === nodes[1] ? nodeTitle(nodes[0]) : '';
+  return { kind: 'diagram', diagram: where[0] + 1, ...(node ? { node } : {}), quote };
+}
+
+document.addEventListener('mouseup', e => {
+  if (e.target.closest?.('#add') || drag) return;
+  setTimeout(() => {
+    const sel = getSelection(), add = $('#add');
+    const within = sel.rangeCount && !sel.isCollapsed && sel.toString().trim()
+      && world.contains(sel.anchorNode) && world.contains(sel.focusNode);
+    if (!within || sent) { add.hidden = true; return; }
+    const range = sel.getRangeAt(0).cloneRange();
+    pending = { range, anchor: anchorOf(range, sel.toString().trim()) };
+    const r = range.getBoundingClientRect();
+    add.style.top = r.bottom + 6 + 'px';
+    add.style.left = r.left + 'px';
+    add.hidden = false;
+  });
+});
+// Double-clicking a box comments on the box as a whole.
+world.addEventListener('dblclick', e => {
+  const g = e.target.closest('g.node');
+  if (!g || sent) return;
+  const d = diagrams.findIndex(x => x.el.contains(g));
+  getSelection().removeAllRanges();
+  const title = nodeTitle(g);
+  addComment({ kind: 'diagram', diagram: d + 1, node: title, quote: title }, null, g);
+});
+$('#add').onmousedown = e => e.preventDefault();
+$('#add').onclick = () => {
+  $('#add').hidden = true;
+  getSelection().removeAllRanges();
+  addComment(pending.anchor, pending.range);
+};
+window.planPage = { comment: anchor => { if (!sent) addComment(anchor, null); } };
+
+const label = a => a.kind === 'diagram' ? 'Diagram ' + a.diagram + (a.node ? ' · ' + a.node : '')
+  : a.kind === 'code' ? a.file + ':' + a.start + (a.end > a.start ? '-' + a.end : '') : '';
+// Comments on the plan in the order they appear, then comments on code by file and line.
+const before = (a, b) =>
+  a.range && b.range ? a.range.compareBoundaryPoints(Range.START_TO_START, b.range)
+  : a.range || a.el ? -1 : b.range || b.el ? 1 : a.anchor.file.localeCompare(b.anchor.file) || a.anchor.start - b.anchor.start;
+
+function addComment(anchor, range, el = null) {
+  const c = { anchor, range, el };
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = '<button class="x" title="Delete">×</button>'
+    + (label(anchor) ? '<div class="at"></div>' : '')
+    + '<blockquote></blockquote><textarea rows="3" placeholder="Comment…"></textarea>';
+  const quote = card.querySelector('blockquote'), at = card.querySelector('.at');
+  quote.textContent = anchor.quote;
+  if (at) at.textContent = label(anchor);
+  const reveal = range ? () => focusOn(range.startContainer.parentElement)
+    : el ? () => focusOn(el)
+    : () => host.open?.({ file: anchor.file, line: anchor.start, end: anchor.end });
+  quote.onclick = reveal;
+  if (at) at.onclick = reveal;
+  card.querySelector('.x').onclick = () => {
+    comments.splice(comments.indexOf(c), 1);
+    if (range) hl?.delete(range);
+    card.remove();
+    $('#empty').hidden = comments.length > 0;
+  };
+  c.note = card.querySelector('textarea');
+  comments.push(c);
+  comments.sort(before);
+  $('#list').insertBefore(card, $('#list').children[comments.indexOf(c)] || null);
+  if (range) hl?.add(range);
+  $('#panel').classList.remove('closed');
+  $('#reopen').hidden = true;
+  $('#empty').hidden = true;
+  $('#note').textContent = '';
+  c.note.focus();
+}
+
+// ---- Sending: approve, request changes, or end with nothing.
+const collect = verdict => ({
+  verdict,
+  general: $('#general').value.trim(),
+  comments: comments.map(c => ({ note: c.note.value.trim(), anchor: c.anchor })).filter(c => c.note),
+});
+const drafted = () => { const d = collect('changes'); return d.comments.length > 0 || d.general !== ''; };
+
+async function submit(verdict) {
+  const body = collect(verdict);
+  if (verdict === 'changes' && !body.comments.length && !body.general) {
+    $('#note').textContent = 'Add a comment first, or approve.';
+    return;
+  }
+  try { await host.feedback(body); } catch {
+    $('#note').textContent = 'Could not reach Claude — the review has stopped.';
+    return;
+  }
+  done('Sent to Claude.' + (host.onRevised ? ' A revised plan will open here.' : ' You can close this tab.'));
+}
+
+// Ending sends no feedback: the agent is told the review stopped, with no instructions.
+// With comments drafted, the first click asks, the second ends.
+let confirmEnd = false;
+async function end() {
+  if (drafted() && !confirmEnd) {
+    confirmEnd = true;
+    $('#end').textContent = 'Discard your comments and end?';
+    setTimeout(() => { confirmEnd = false; $('#end').textContent = 'End review without feedback'; }, 4000);
+    return;
+  }
+  try { await host.feedback({ verdict: 'end' }); } catch {}
+  done('Review ended — no feedback sent.' + (host.onRevised ? '' : ' You can close this tab.'));
+}
+
+$('#approve').onclick = () => submit('approve');
+$('#send').onclick = () => submit('changes');
+$('#end').onclick = end;
+// Closing the tab ends the review too, rather than leaving the agent waiting forever;
+// the broker holds the end briefly, so a reload can take the review back.
+addEventListener('pagehide', () => { if (!sent) host.leave(); });
+addEventListener('beforeunload', e => { if (!sent && drafted()) e.preventDefault(); });
+
+host.session().then(session => { show(session); host.onRevised?.(show); },
+  () => done('Could not reach the review — it has stopped.'));
+</script>
+</body>
+</html>

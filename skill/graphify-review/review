@@ -1,0 +1,39 @@
+#!/bin/sh
+# Run the review server, compiling it on first use (or after review.cpp changes).
+set -e
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+src="$dir/review.cpp"
+bin="$dir/bin/review"
+stamp="$dir/bin/review.stamp"
+
+# Rebuild when the source changes. Checksums, not timestamps: `test -nt` compares
+# whole seconds on macOS, so an edit and a run in the same second would be missed.
+want=$(cksum < "$src")
+have=$(cat "$stamp" 2>/dev/null) || have=""
+
+if [ ! -x "$bin" ] || [ "$want" != "$have" ]; then
+  cxx=${CXX:-}
+  if [ -z "$cxx" ]; then
+    for candidate in c++ clang++ g++; do
+      if command -v "$candidate" >/dev/null 2>&1; then
+        cxx=$candidate
+        break
+      fi
+    done
+  fi
+  if [ -z "$cxx" ]; then
+    echo "review: no C++ compiler found. On macOS run: xcode-select --install" >&2
+    exit 1
+  fi
+  mkdir -p "$dir/bin"
+  # Build to a unique path and move it into place, so concurrent runs can't
+  # execute a half-written binary.
+  tmp="$bin.$$"
+  echo "review: building the server (one time, ~1s)…" >&2
+  "$cxx" -std=c++17 -O2 -pthread -o "$tmp" "$src"
+  mv -f "$tmp" "$bin"
+  printf '%s\n' "$want" > "$stamp"
+fi
+
+exec "$bin" "$@"

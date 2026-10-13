@@ -5,6 +5,10 @@
 // It finds sessions two ways: the broker hands one over by URI
 // (vscode://shyamalaravind.plan-viewer/session?key=<key>), and every waiting session is
 // announced in $XDG_STATE_HOME/plan-review/sessions/<key>.json, which this watches.
+//
+// In the review instance (a VS Code that vscode/install.sh sets up for reviews alone, where
+// planViewer.reviewWindow is on), a window exists for the reviews of its folder: it shows
+// them without a URI, and once none is waiting it closes, so its language servers go too.
 const vscode = require('vscode');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -15,6 +19,7 @@ const SESSIONS = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(),
   'plan-review', 'sessions');
 
 const reviews = new Map();  // session key → Review shown in this window
+const dismissed = new Set();  // URLs of rounds whose tab was closed here, not to reopen
 let status;
 let log;  // "Plan Viewer" in the Output panel, also kept in the window's log folder
 
@@ -46,13 +51,21 @@ function show(session) {
   return review;
 }
 
-// Brings the next round of a plan shown here into its panel, and counts the reviews
-// waiting that this window doesn't show.
+// Brings the next round of a plan shown here into its panel, notices rounds that ended
+// without this window, and counts the reviews waiting that this window doesn't show. A
+// review window shows the ones for its folder instead.
 function refresh() {
   const waiting = waitingSessions();
   for (const s of waiting) {
     const review = reviews.get(s.key);
     if (review && review.session.url !== s.url) review.revise(s);
+  }
+  for (const review of reviews.values())
+    if (review.open && !waiting.some(s => s.url === review.session.url)) review.ended(verdictOf(review.session));
+  if (reviewWindow()) {
+    for (const s of waiting)
+      if (!reviews.has(s.key) && !dismissed.has(s.url) && ownFolder(s.root)) show(s);
+    return status.hide();
   }
   const unseen = waiting.filter(s => !reviews.has(s.key));
   status.text = `$(comment-discussion) ${unseen.length} plan${unseen.length === 1 ? '' : 's'} to review`;
@@ -60,8 +73,61 @@ function refresh() {
   unseen.length ? status.show() : status.hide();
 }
 
+// How a session's round ended, from the broker's <key>.round: the verdict on its second
+// line, or `changes` once the next round has begun. A broker that was stopped leaves none.
+function verdictOf(session) {
+  let lines = [];
+  try { lines = fs.readFileSync(path.join(SESSIONS, session.key + '.round'), 'utf8').split('\n'); } catch {}
+  if (parseInt(lines[0], 10) > session.round) return 'changes';
+  return lines[1] || 'end';
+}
+
 function updateContext() {
   vscode.commands.executeCommand('setContext', 'planViewer.reviewing', [...reviews.values()].some(r => r.open));
+}
+
+// ---------------------------------------------------------------- review windows
+
+const REVISION_WAIT = 10 * 60 * 1000;  // how long a window waits for a revised plan
+
+const reviewWindow = () => vscode.workspace.getConfiguration('planViewer').get('reviewWindow', false);
+
+function realpath(p) {
+  try { return fs.realpathSync(p); } catch { return p; }
+}
+
+// The broker gives the root as a real path.
+const ownFolder = root => (vscode.workspace.workspaceFolders || []).some(f => realpath(f.uri.fsPath) === root);
+
+// One file per review window, named by its extension host's pid, so the last window to
+// close can quit the review instance: on macOS a VS Code with no window keeps running.
+let windowsDir;
+
+function liveWindows() {
+  let names = [];
+  try { names = fs.readdirSync(windowsDir); } catch {}
+  return names.map(Number).filter(pid => {
+    if (pid && alive(pid)) return true;
+    try { fs.unlinkSync(path.join(windowsDir, String(pid))); } catch {}
+    return false;
+  });
+}
+
+let closeTimer;
+
+// Once no review here waits for feedback, a review window closes: at once when they're
+// done, or after REVISION_WAIT when changes were asked for and no revised plan came back.
+function settle() {
+  clearTimeout(closeTimer);
+  if (!reviewWindow()) return;
+  const all = [...reviews.values()];
+  if (all.some(r => r.open)) return;
+  const wait = all.some(r => r.verdict === 'changes') ? REVISION_WAIT : 1500;
+  closeTimer = setTimeout(() => {
+    const last = !liveWindows().some(pid => pid !== process.pid);
+    log.info(`no review waiting: ${last ? 'quitting the review instance' : 'closing this window'}`);
+    vscode.commands.executeCommand(last ? 'workbench.action.quit' : 'workbench.action.closeWindow');
+  }, wait);
 }
 
 // ---------------------------------------------------------------- code lookup
@@ -140,6 +206,7 @@ class Review {
   constructor(session, panel = null) {
     this.session = session;
     this.open = true;            // this round still waits for feedback
+    this.verdict = null;         // how the round ended: approve, changes or end
     this.locations = new Map();  // name key → Promise<Location | null>
     this.mentioned = [];         // the files the plan mentions, searched first for bare names
     this.symbols = new Map();    // file → Promise<[uri, document symbols]>
@@ -157,6 +224,7 @@ class Review {
     reviews.set(session.key, this);
     updateContext();
     refresh();
+    settle();
   }
 
   title() { return 'Review · ' + (this.session.title || this.session.name); }
@@ -210,8 +278,16 @@ class Review {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     if (!r.ok) throw new Error('the review has stopped');
+    this.ended(body.verdict);
+  }
+
+  // This round has its answer, given here or elsewhere.
+  ended(verdict) {
+    log.info(`${this.session.key}: round ${this.session.round} ended: ${verdict}`);
     this.open = false;
+    this.verdict = verdict;
     updateContext();
+    settle();
   }
 
   // The next round of the same plan: same panel, new broker. The page loads afresh, so it
@@ -220,12 +296,14 @@ class Review {
     log.info(`round ${session.round} of ${session.key}`);
     this.session = session;
     this.open = true;
+    this.verdict = null;
     this.locations.clear();
     this.symbols.clear();
     this.panel.title = this.title();
     this.panel.webview.html = this.html();
     this.panel.reveal(undefined, true);
     updateContext();
+    settle();
   }
 
   // ---- names → code
@@ -316,13 +394,16 @@ class Review {
   dispose() {
     log.info(`closed ${this.session.key}${this.open ? ', which ends its round' : ''}`);
     reviews.delete(this.session.key);
-    if (this.open)
+    if (this.open) {
+      dismissed.add(this.session.url);
       fetch(this.session.url + 'feedback', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ verdict: 'end', leaving: true }),
       }).catch(() => {});
+    }
     updateContext();
     refresh();
+    settle();
   }
 }
 
@@ -362,6 +443,12 @@ async function openWaiting() {
 function activate(context) {
   log = vscode.window.createOutputChannel('Plan Viewer', { log: true });
   fs.mkdirSync(SESSIONS, { recursive: true });
+  if (reviewWindow()) {
+    windowsDir = path.join(context.globalStorageUri.fsPath, 'windows');
+    fs.mkdirSync(windowsDir, { recursive: true });
+    fs.writeFileSync(path.join(windowsDir, String(process.pid)), '');
+    log.info('a review window');
+  }
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.command = 'planViewer.openWaiting';
   let timer;
@@ -393,9 +480,12 @@ function activate(context) {
     }),
   );
   refresh();
+  settle();  // a review window with no review to show closes, too
   return { show, reviews, SESSIONS };  // for the integration test
 }
 
-function deactivate() {}
+function deactivate() {
+  if (windowsDir) try { fs.unlinkSync(path.join(windowsDir, String(process.pid))); } catch {}
+}
 
 module.exports = { activate, deactivate };

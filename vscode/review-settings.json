@@ -1,0 +1,39 @@
+// User settings of the review instance: the VS Code that graphify-review opens plans in.
+// vscode/install.sh copies this file there, so change it here and run install.sh again.
+{
+  // Its windows exist for reviews: each shows the reviews for its folder, and closes
+  // once none is waiting.
+  "planViewer.reviewWindow": true,
+
+  // Reopen nothing: every review opens the window it needs.
+  "window.restoreWindows": "none",
+  "workbench.startupEditor": "none",
+  "workbench.tips.enabled": false,
+
+  // Open the code in Restricted Mode without asking. Reading needs no trust, and nothing
+  // from the repository runs: no tasks, no workspace TypeScript or its plugins.
+  "security.workspace.trust.startupPrompt": "never",
+  "security.workspace.trust.banner": "never",
+  "security.workspace.trust.emptyWindow": false,
+
+  // TypeScript is the one language server here. Keep it small: one server process, no
+  // type downloads, and no index of every package for auto-imports. Its memory stays at
+  // VS Code's default ceiling: a large project needs about 2 GB, and below what it needs
+  // the server crashes rather than shrinks.
+  "typescript.tsserver.useSyntaxServer": "never",
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.preferences.includePackageJsonAutoImports": "off",
+  "typescript.suggest.autoImports": false,
+  "javascript.suggest.autoImports": false,
+
+  // Nothing else in the background.
+  "git.enabled": false,
+  "chat.disableAIFeatures": true,
+  "npm.autoDetect": "off",
+  "task.autoDetect": "off",
+  "extensions.autoCheckUpdates": false,
+  "extensions.autoUpdate": false,
+  "update.mode": "none",
+  "telemetry.telemetryLevel": "off",
+  "workbench.enableExperiments": false
+}

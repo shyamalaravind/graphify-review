@@ -2,13 +2,14 @@
   "name": "plan-viewer",
   "displayName": "Plan Viewer",
   "description": "Review an agent's plan inside VS Code: its prose and diagrams as one view, where every name hovers and opens like code.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "shyamalaravind",
   "repository": "https://github.com/shyamalaravind/plan-review",
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other"],
   "main": "./extension.js",
   "activationEvents": ["onStartupFinished", "onUri", "onWebviewPanel:planViewer"],
+  "capabilities": { "untrustedWorkspaces": { "supported": true } },
   "contributes": {
     "commands": [
       { "command": "planViewer.openWaiting", "title": "Plan Review: Open a Waiting Review" },
@@ -21,6 +22,16 @@
       "commandPalette": [
         { "command": "planViewer.commentOnSelection", "when": "planViewer.reviewing" }
       ]
+    },
+    "configuration": {
+      "title": "Plan Viewer",
+      "properties": {
+        "planViewer.reviewWindow": {
+          "type": "boolean",
+          "default": false,
+          "description": "Windows that exist only for plan reviews: they show the reviews waiting for their folder, and close once none is waiting. vscode/install.sh turns it on in the review instance."
+        }
+      }
     }
   }
 }

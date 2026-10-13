@@ -54,7 +54,7 @@ and in node labels alike. These are what an editor viewer can find in the code:
 | --- | --- | --- |
 | `file: name()` | `server.ts: serve()` | the symbols of that file |
 | `name()`, qualified or not | `serve()`, `Broker.render()`, `JParser::value()` | the files the plan mentions, then the workspace |
-| a path, with lines or without | `src/server.ts:42-60`, `skill/plan-review/page.html` | the file |
+| a path, with lines or without | `src/server.ts:42-60`, `skill/graphify-review/page.html` | the file |
 
 - In a code span, a bare identifier also counts when it is qualified or camelCase or
   snake_case (`findNames`, `g_root`); a plain word (`verdict`) stays text.
