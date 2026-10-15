@@ -28,20 +28,24 @@ Ask for it by name (`/graphify-review`, or `/graphify-review path/to/file.md`). 
 ```mermaid
 flowchart LR
   A["agent<br/>Claude Code, Codex…"] -->|"plan.md"| B["review: the broker<br/>one round of a session"]
-  B <-->|"session protocol"| W["browser viewer"]
+  B <-->|"session protocol"| W["browser viewer<br/>names → the broker, by text"]
   B <-->|"session protocol"| V["VS Code viewer<br/>names → language servers"]
   B -->|"feedback as text"| A
 ```
 
 - **The channel.** `review` is the broker: it holds one round of a plan's review, announces it, opens your viewer, and prints the feedback when it comes back. Agents only ever run this command.
-- **The viewers.** Anything that speaks the [session protocol](#session-protocol). The same page runs in both: the browser shows it as is, and the VS Code extension hosts it in a tab and answers its questions about the code.
+- **The viewers.** Anything that speaks the [session protocol](#session-protocol). The same page runs in both and asks the same questions about the code: in the browser the broker answers them from the code's text, and in VS Code the extension answers them through the language servers.
 - **The plan format.** [`FORMAT.md`](skill/graphify-review/FORMAT.md): a code-flow flowchart, a description entry per changed node, and names written as `file: name()` or `path/file.ts:42-60`. The skill has the agent write plans this way.
 
 ### Viewers
 
 Both viewers show the plan as one canvas filling the window, not as a document. The intro is a card, each `##` section a frame, and each flowchart box carries its description entry inside it, so the diagram is the explanation. Drag empty space or scroll to move around; ⌘-scroll or pinch to zoom; **Fit** shows everything. Comments sit in a panel on the right: select text, or double-click a box, to comment on it.
 
-**Browser** (the default), honouring `PLAN_REVIEW_BROWSER` like plan-review.
+**Browser** (the default), honouring `PLAN_REVIEW_BROWSER` like plan-review. The lightest way to review: no language server starts, only the broker (a few MB) and one tab.
+
+- Every name in the plan that is defined in the code becomes a link. The broker finds it by text: the file the plan names, else the files it mentions, else one pass over the repository's files (git's, or a walk that skips dependency and build folders) that checks only the lines mentioning the name for the shapes definitions take in most languages: `function x`, `class X`, `def x`, `x(…) {`, `public x: T`. On a 7,000-file Angular repository it found the same 41 of a plan's 45 names as VS Code's language servers, in 0.3 seconds.
+- Hover a name for the lines of its definition (no types: there is no language server); click it to open it in your editor at that line. `PLAN_REVIEW_EDITOR` is the command that opens `path:line` (`zed`, `code -g`, `subl`); unset, it is Zed if `zed` is on your `PATH`, else VS Code, else the file's default app.
+- Text can't follow imports: a name defined in more than one place goes to the shortest path, and a library's functions (`switchMap`) aren't found.
 
 **VS Code** (`PLAN_REVIEW_VIEWER=vscode`). The same view, plus code navigation through VS Code's own language servers:
 
@@ -87,6 +91,7 @@ plan-review/vscode/install.sh
 ```sh
 export PLAN_REVIEW_VIEWER=vscode             # graphify-review only; or browser, the default
 export PLAN_REVIEW_BROWSER="Brave Browser"   # both skills; macOS. brave-browser on Linux
+export PLAN_REVIEW_EDITOR=zed                # graphify-review in the browser: opens path:line
 ```
 
 Put these in `~/.zshenv` (or your shell's equivalent), not `~/.zshrc`. Agents run commands in non-interactive shells, and those skip `~/.zshrc`.
@@ -110,6 +115,9 @@ The file goes when the round ends, and `<key>.round` beside it then holds the ro
 | `GET <url>session` | `{key, name, title, text, root, round}` |
 | `GET <url>mermaid.min.js` | the diagram renderer, for a page that has diagrams |
 | `POST <url>feedback` | `{verdict, general, comments: [{note, anchor}]}`, where `verdict` is `approve`, `changes` or `end` |
+| `POST <url>resolve` | `{keys, files}` → which of the names exist in the code, as `[true, false, …]`; a key is `{file?, name?, line?, end?}`, and `files` are the ones the plan mentions, searched first |
+| `POST <url>hover` | a key → `{markdown, where}`: the lines of its definition, and `path:line` |
+| `POST <url>open` | a key → opens it in `PLAN_REVIEW_EDITOR` |
 
 A comment's `anchor` says what it's about: `{kind: "quote", quote}` for prose, `{kind: "diagram", diagram, node?, quote}` for a diagram (numbered from 1) and the node in it, `{kind: "code", file, start, end, quote}` for lines of code. `{verdict: "end", leaving: true}` means the viewer went away: the broker waits two seconds for it to come back (a reload) before ending the review.
 

@@ -1,9 +1,9 @@
 # The plan format
 
 How to write a plan that changes code, so the reviewer can read it as a picture first
-and every name in it leads to the code. Every viewer draws the diagrams; an editor viewer
-(VS Code) also resolves each name through the language servers, so hovering it shows its
-hover and clicking it opens the definition.
+and every name in it leads to the code. Every viewer draws the diagrams and resolves each
+name, so hovering it shows its definition and clicking it opens it: the browser by
+searching the code's text, VS Code through the language servers.
 
 Plans that don't change code (a resume, a write-up) need none of this.
 
@@ -12,7 +12,8 @@ Plans that don't change code (a resume, a write-up) need none of this.
 - **A code-flow flowchart** (a ```` ```mermaid ```` block, `flowchart`): the path a
   call, request or event takes through the code the change touches, from where it
   starts to where it ends. Each node is a real place in the code. Its first line is the
-  name, `file: function()`; a second line after `<br/>` can say what happens there. Each
+  name, `file: function()`, or `file: Type` for a type or a field; a second line after
+  `<br/>` can say what happens there. Each
   edge says what passes along it. Mark what the change adds or alters, so new and changed
   steps stand out from untouched ones:
 
@@ -48,11 +49,11 @@ diagram its own section, with a heading that says what it shows.
 ## Names
 
 Write every function, type or file the plan talks about in one of these forms, in prose
-and in node labels alike. These are what an editor viewer can find in the code:
+and in node labels alike. These are what the viewers can find in the code:
 
 | Form | Example | Found by |
 | --- | --- | --- |
-| `file: name()` | `server.ts: serve()` | the symbols of that file |
+| `file: name()`, or `file: Name` for a type or a field | `server.ts: serve()`, `session.ts: Session` | the symbols of that file |
 | `name()`, qualified or not | `serve()`, `Broker.render()`, `JParser::value()` | the files the plan mentions, then the workspace |
 | a path, with lines or without | `src/server.ts:42-60`, `skill/graphify-review/page.html` | the file |
 

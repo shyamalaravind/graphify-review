@@ -162,13 +162,18 @@ marked.use({ renderer: { html: esc } });
 //   onRevised(fn) → fn(session) when the plan's next round arrives
 //   shown(stats)  → told once the plan is drawn and its names first resolved
 // and it calls window.planPage.comment(anchor) to add a comment on code from the editor.
+// The broker that served a browser tab looks names up in the code's text itself.
+const post = (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body) }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
 const host = window.planHost || {
   session: () => fetch('session').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
-  feedback: body => fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body) }).then(r => { if (!r.ok) throw new Error(r.status); }),
+  feedback: body => post('feedback', body),
   leave: () => navigator.sendBeacon('feedback',
     new Blob([JSON.stringify({ verdict: 'end', leaving: true })], { type: 'application/json' })),
   asset: name => name,
+  resolve: (keys, files) => post('resolve', { keys, files }),
+  hover: key => post('hover', key),
+  open: key => post('open', key),
 };
 const navigable = typeof host.resolve === 'function';
 
@@ -243,13 +248,14 @@ function frames(staging) {
   return out.filter(f => f.textContent.trim() || f.querySelector('.diagram'));
 }
 
-// ---- Names: the functions, files and lines a plan mentions, which an editor host can
-// resolve to code. `file: name()`, `name()`, `Qualified.name` and `file:12-20`, in prose
-// and in diagram labels; in a code span, also a camelCase or snake_case identifier.
+// ---- Names: the functions, types, files and lines a plan mentions, which the host can
+// resolve to code. `file: name()`, `file: Type` (a type or a field, without parentheses),
+// `name()`, `Qualified.name` and `file:12-20`, in prose and in diagram labels; in a code
+// span, also a camelCase or snake_case identifier.
 // A file needs a source extension, so `store.select` stays a name while `page.html` is a file.
 const FILE = String.raw`[\w@.\-/]*\w\.(?:[cm]?[jt]sx?|json|html?|s?css|less|md|mdx|vue|svelte|py|rb|go|rs|java|kt|swift|cs|c|cc|cpp|h|hpp|m|mm|php|sh|zsh|bash|toml|ya?ml|xml|sql|ini|conf|txt|lock|gradle|proto|graphql)\b`;
 const IDENT = String.raw`[A-Za-z_$][\w$]*(?:(?:::|\.|#)[A-Za-z_$][\w$]*)*`;
-const IN_TEXT = new RegExp(String.raw`(${FILE}):\s*(${IDENT})\(\)|(${FILE}):(\d+)(?:-(\d+))?|\b(${IDENT})\(\)`, 'g');
+const IN_TEXT = new RegExp(String.raw`(${FILE}):\s*(${IDENT})(?:\(\))?|(${FILE}):(\d+)(?:-(\d+))?|\b(${IDENT})\(\)`, 'g');
 const WHOLE_CODE = new RegExp(String.raw`^(?:(${FILE}):\s*)?(${IDENT})(\(\))?$`);
 const WHOLE_FILE = new RegExp(String.raw`^(${FILE})(?::(\d+)(?:-(\d+))?)?$`);
 

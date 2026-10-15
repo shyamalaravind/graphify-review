@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -20,11 +21,16 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <random>
+#include <regex>
 #include <sstream>
+#include <string_view>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #ifdef __APPLE__
@@ -471,6 +477,432 @@ static void on_signal(int sig) {
   ::_exit(128 + sig);
 }
 
+// ---------------------------------------------------------------- code lookup
+
+// In the browser the broker answers the page's questions about names itself, from the
+// code's text: where a name is defined, the lines there for a hover, and opening them in
+// the user's editor. No language server runs, so a hover has no types, but nothing starts.
+
+static std::string g_root;  // the code the plan is about
+
+struct Place {
+  std::string file;  // relative to g_root
+  int line = 0;      // from 1; 0 for a whole file
+  int end = 0;       // the last line of a range the plan gave
+};
+
+// A name as the page asks about it: `file: name()`, `name()`, or `file:12-20`.
+struct NameKey {
+  std::string file, name;
+  int line = 0, end = 0;
+  std::string id() const {
+    return file + '\x1f' + name + '\x1f' + std::to_string(line) + '\x1f' + std::to_string(end);
+  }
+};
+
+static NameKey key_of(const JVal &v) {
+  NameKey k;
+  k.file = v.text("file");
+  k.name = v.text("name");
+  if (const JVal *l = v.get("line")) if (l->type == JVal::Num) k.line = static_cast<int>(l->number);
+  if (const JVal *e = v.get("end")) if (e->type == JVal::Num) k.end = static_cast<int>(e->number);
+  return k;
+}
+
+static std::mutex g_lookup_mutex;  // guards everything below
+static std::vector<std::string> g_files;
+static bool g_files_listed = false;
+static std::map<std::string, std::optional<Place>> g_places;  // name key → where, if anywhere
+
+static bool on_path(const std::string &cmd) {
+  return std::system(("command -v " + cmd + " >/dev/null 2>&1").c_str()) == 0;
+}
+
+// The root's files: git's, tracked or not ignored, or else a walk that skips hidden,
+// dependency and build folders.
+static const std::vector<std::string> &root_files() {
+  if (g_files_listed) return g_files;
+  g_files_listed = true;
+  std::istringstream git(capture("git -C " + shell_quote(g_root) +
+                                 " ls-files -co --exclude-standard 2>/dev/null"));
+  for (std::string line; std::getline(git, line);)
+    if (!line.empty()) g_files.push_back(line);
+  if (!g_files.empty()) return g_files;  // from git
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  for (auto it = fs::recursive_directory_iterator(g_root, fs::directory_options::skip_permission_denied, ec);
+       !ec && it != fs::recursive_directory_iterator() && g_files.size() < 50000; it.increment(ec)) {
+    std::string name = it->path().filename().string();
+    if (it->is_directory(ec)) {
+      static const char *skip[] = {"node_modules", "dist", "build", "out", "bin", "obj", "target", "vendor"};
+      if (name[0] == '.' || std::find(std::begin(skip), std::end(skip), name) != std::end(skip))
+        it.disable_recursion_pending();
+    } else if (it->is_regular_file(ec)) {
+      g_files.push_back(fs::relative(it->path(), g_root, ec).string());
+    }
+  }
+  return g_files;
+}
+
+// The files a plan's file name can mean: the path from the root, or else every path that
+// ends in it, shortest first.
+static std::vector<std::string> find_files(std::string given) {
+  if (!given.empty() && given[0] == '/') {
+    if (given.compare(0, g_root.size() + 1, g_root + "/") != 0) return {};
+    given = given.substr(g_root.size() + 1);
+  }
+  if (given.empty() || given.find("..") != std::string::npos) return {};
+  struct stat st;
+  if (::stat((g_root + "/" + given).c_str(), &st) == 0 && S_ISREG(st.st_mode)) return {given};
+  std::vector<std::string> found;
+  std::string tail = "/" + given;
+  for (const auto &f : root_files())
+    if (f.size() > tail.size() && f.compare(f.size() - tail.size(), tail.size(), tail) == 0) found.push_back(f);
+  std::stable_sort(found.begin(), found.end(), [](const std::string &a, const std::string &b) { return a.size() < b.size(); });
+  return found;
+}
+
+static std::string find_file(const std::string &given) {
+  std::vector<std::string> found = find_files(given);
+  return found.empty() ? "" : found[0];
+}
+
+static std::vector<std::string> file_lines(const std::string &file) {
+  std::string text;
+  std::vector<std::string> lines;
+  if (!read_file(g_root + "/" + file, text) || text.size() > (4u << 20)) return lines;
+  std::istringstream in(text);
+  for (std::string line; std::getline(in, line);) lines.push_back(line);
+  return lines;
+}
+
+// Where `id` first stands on a line as a whole word, or npos.
+static size_t word_at(const std::string &line, const std::string &id) {
+  auto word = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$'; };
+  for (size_t at = line.find(id); at != std::string::npos; at = line.find(id, at + 1))
+    if ((at == 0 || !word(line[at - 1])) && (at + id.size() >= line.size() || !word(line[at + id.size()])))
+      return at;
+  return std::string::npos;
+}
+
+// A line that defines a name, and how surely: 0 a declaration keyword (function, class,
+// def, fn…, or a variable given a function), 1 a signature whose body opens on the line or
+// whose parameters go on below, 2 a variable or field given anything else.
+struct Shapes {
+  std::regex keyword, variable, assigned, field;
+};
+
+static const Shapes &shapes_for(const std::string &id) {
+  static std::map<std::string, Shapes> made;
+  auto found = made.find(id);
+  if (found != made.end()) return found->second;
+  std::string q;
+  for (char c : id) q += std::isalnum(static_cast<unsigned char>(c)) || c == '_' ? std::string(1, c) : std::string("\\") + c;
+  const std::string after = "(?![\\w$])";
+  Shapes s{
+      std::regex("\\b(?:function\\*?|class|interface|type|enum|struct|union|trait|impl|def|fn|func|fun|"
+                 "sub|module|namespace|record|object|macro)\\s+(?:\\([^)]*\\)\\s*)?" + q + after),
+      std::regex("\\b(?:const|let|var|val)\\s+" + q + after + "(\\s*(?::[^=]*)?=\\s*(?:async\\s*)?"
+                 "(?:function\\b|\\(|<|[\\w$]+\\s*=>))?"),
+      std::regex("^\\s*(?:(?:export|static|readonly|private|public|protected|async)\\s+)*" + q +
+                 "\\s*[:=]\\s*(?:async\\s*)?(?:function\\b|\\(|[\\w$]+\\s*=>)"),
+      // A class field or interface member: after a modifier, or typed and ended by `;`.
+      std::regex("^\\s*(?:@[\\w$.]+(?:\\([^)]*\\))?\\s+)*(?:(?:(?:public|private|protected|readonly|static|declare|"
+                 "override|abstract)\\s+)+" + q + "\\s*[?!]?\\s*[:=]|" + q + "\\s*[?!]?\\s*:[^=;]+;\\s*$)"),
+  };
+  return made.emplace(id, std::move(s)).first->second;
+}
+
+// What may follow a definition's parameters on its line: its body, a return type, or a
+// qualifier. A call goes on with `.`, `,`, `)` or `;` instead.
+static const std::regex kAfterParams("^\\s*(?:\\{|:|->|(?:const|override|final|noexcept|mutable|throws|where)\\b)");
+
+// Words after which a name is used, not defined: `return foo(`, `new Foo(`, `if foo`.
+static bool control_word(const std::string &w) {
+  static const char *words[] = {"return", "await", "new", "throw", "yield", "typeof", "delete", "case", "else",
+                                "if", "while", "for", "switch", "do", "in", "of", "void", "and", "or", "not", "is", "as"};
+  return std::any_of(std::begin(words), std::end(words), [&](const char *x) { return w == x; });
+}
+
+static int definition_rank(const std::string &line, const std::string &id) {
+  size_t at = word_at(line, id);
+  if (at == std::string::npos) return -1;
+  // Most lines that mention a name only use it, so cheap checks come first. Before a
+  // definition's name comes nothing, or a keyword, a modifier or a type: never `.`, `(`
+  // or `=`, and no `return` or `new`.
+  size_t b = at ? line.find_last_not_of(" \t", at - 1) : std::string::npos;
+  char prev = b == std::string::npos ? 0 : line[b];
+  bool word_before = prev && (std::isalnum(static_cast<unsigned char>(prev)) || prev == '_');
+  if (prev && !word_before && !std::strchr("$)>*&:]@", prev)) return -1;
+  if (word_before) {
+    size_t w = line.find_last_of(" \t", b);
+    w = w == std::string::npos ? 0 : w + 1;
+    if (control_word(line.substr(w, b + 1 - w))) return -1;
+  }
+  const Shapes &s = shapes_for(id);
+  size_t open = line.find_first_not_of(" \t", at + id.size());
+  if (open != std::string::npos && line[open] == '<') {  // type parameters: foo<T>(
+    size_t gt = line.find('>', open);
+    open = gt == std::string::npos ? gt : line.find_first_not_of(" \t", gt + 1);
+  }
+  if (open != std::string::npos && line[open] == '(') {
+    bool keyword = prev && std::regex_search(line, s.keyword);
+    size_t close = open;
+    for (int depth = 0; close < line.size(); close++) {
+      if (line[close] == '(') depth++;
+      else if (line[close] == ')' && --depth == 0) break;
+    }
+    // An arrow among the arguments is a call handing over a callback, `foo(x => {`.
+    if (line.substr(open, close - open).find("=>") != std::string::npos) return keyword ? 0 : -1;
+    // A signature's parameters close here and its body, return type or a qualifier
+    // follows; or they go on below, after a modifier or a type that a call doesn't have.
+    bool signature = close < line.size() ? std::regex_search(line.substr(close + 1), kAfterParams) : prev != 0;
+    return keyword ? 0 : signature ? 1 : -1;
+  }
+  std::smatch m;
+  if (prev && std::regex_search(line, s.keyword)) return 0;
+  if (prev && std::regex_search(line, m, s.variable)) return m[1].matched ? 0 : 2;
+  if (std::regex_search(line, s.assigned)) return 0;
+  if (std::regex_search(line, s.field)) return 2;
+  return -1;
+}
+
+struct Candidate {
+  std::string file;
+  int line = 0, rank = 0;
+  std::string container;  // the nearest class, struct… above it
+  bool qualified = false; // written as Parent::name or Parent.name
+};
+
+static const std::regex kContainer(
+    "\\b(?:class|struct|interface|object|impl|trait|enum|namespace|module|record)\\s+([\\w$]+)");
+
+// The container is followed only for a qualified name, and the regex only runs on a line
+// with one of its keywords, since this scans every line of a file.
+static bool may_open_container(const std::string &line) {
+  static const char *words[] = {"class", "struct", "interface", "object", "impl", "trait", "enum", "namespace", "module", "record"};
+  return std::any_of(std::begin(words), std::end(words), [&](const char *w) { return line.find(w) != std::string::npos; });
+}
+
+static void scan_lines(const std::string &file, const std::vector<std::string> &lines,
+                       const std::string &id, const std::string &parent, std::vector<Candidate> &out) {
+  std::string container;
+  for (size_t n = 0; n < lines.size(); n++) {
+    const std::string &line = lines[n];
+    std::smatch m;
+    if (!parent.empty() && may_open_container(line) && std::regex_search(line, m, kContainer))
+      container = m[1];
+    int rank = definition_rank(line, id);
+    if (rank < 0) continue;
+    bool qualified = !parent.empty() && (line.find(parent + "::" + id) != std::string::npos ||
+                                         line.find(parent + "." + id) != std::string::npos);
+    out.push_back({file, static_cast<int>(n + 1), rank, container, qualified});
+  }
+}
+
+// The likeliest definition: inside the plan's qualifier when it gave one (only there, when
+// `strict`), then the surest shape, the shortest path, the earliest line.
+static std::optional<Candidate> pick(std::vector<Candidate> found, const std::string &parent,
+                                     bool strict = false) {
+  if (!parent.empty()) {
+    std::vector<Candidate> inside;
+    for (const auto &c : found)
+      if (c.qualified || c.container == parent) inside.push_back(c);
+    if (!inside.empty() || strict) found = inside;
+  }
+  if (found.empty()) return std::nullopt;
+  return *std::min_element(found.begin(), found.end(), [](const Candidate &a, const Candidate &b) {
+    if (a.rank != b.rank) return a.rank < b.rank;
+    if (a.file.size() != b.file.size()) return a.file.size() < b.file.size();
+    return a.line < b.line;
+  });
+}
+
+static bool skipped(const std::string &file) {
+  auto ends = [&](const char *s) {
+    size_t n = std::strlen(s);
+    return file.size() >= n && file.compare(file.size() - n, n, s) == 0;
+  };
+  return file.find("node_modules/") != std::string::npos || ends(".min.js") || ends(".map") ||
+         ends(".lock") || ends("package-lock.json");
+}
+
+// The definitions found under the root, by name, for the names asked about so far.
+static std::map<std::string, std::vector<Candidate>> g_root_hits;
+
+// Reads the root's files once for all the names not searched yet, on a few threads: each
+// file is split into identifiers, and only a line holding a wanted one is checked for a
+// definition. A pass costs the same for one name or forty, where git grep slows down
+// with every pattern added.
+static void search_root_for(const std::vector<std::string> &ids) {
+  const std::vector<std::string> &files = root_files();
+  std::vector<std::string> batch;
+  for (const auto &id : ids)
+    if (!g_root_hits.count(id) && std::find(batch.begin(), batch.end(), id) == batch.end()) batch.push_back(id);
+  if (batch.empty()) return;
+  std::unordered_map<std::string_view, size_t> wanted;
+  for (size_t k = 0; k < batch.size(); k++) {
+    wanted.emplace(batch[k], k);
+    shapes_for(batch[k]);  // made here, so the threads only read them
+  }
+  auto ident = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$'; };
+  unsigned threads = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+  std::vector<std::vector<std::vector<Candidate>>> found(threads, std::vector<std::vector<Candidate>>(batch.size()));
+  std::atomic<size_t> next{0};
+  auto work = [&](unsigned t) {
+    std::string text;
+    for (size_t i; (i = next++) < files.size();) {
+      const std::string &file = files[i];
+      if (skipped(file) || !read_file(g_root + "/" + file, text) || text.size() > (4u << 20) ||
+          std::memchr(text.data(), 0, std::min<size_t>(text.size(), 8000)))
+        continue;
+      std::vector<size_t> seen(batch.size(), 0);  // the last line each name was checked on
+      size_t line = 1, start = 0;
+      for (size_t at = 0; at < text.size();) {
+        if (text[at] == '\n') { line++; start = ++at; continue; }
+        if (!ident(text[at])) { at++; continue; }
+        size_t from = at;
+        while (at < text.size() && ident(text[at])) at++;
+        auto hit = wanted.find(std::string_view(text).substr(from, at - from));
+        if (hit == wanted.end() || seen[hit->second] == line) continue;
+        seen[hit->second] = line;
+        size_t eol = text.find('\n', at);
+        int rank = definition_rank(text.substr(start, eol == std::string::npos ? eol : eol - start), batch[hit->second]);
+        if (rank >= 0) found[t][hit->second].push_back({file, static_cast<int>(line), rank, "", false});
+      }
+    }
+  };
+  std::vector<std::thread> pool;
+  for (unsigned t = 0; t < threads; t++) pool.emplace_back(work, t);
+  for (auto &th : pool) th.join();
+  for (size_t k = 0; k < batch.size(); k++) {
+    auto &hits = g_root_hits[batch[k]];
+    for (auto &per : found) hits.insert(hits.end(), per[k].begin(), per[k].end());
+  }
+}
+
+static std::vector<std::string> name_parts(const std::string &name) {
+  std::vector<std::string> parts;
+  std::string bare = name.substr(0, name.find('('));
+  for (size_t at = 0; at <= bare.size();) {
+    size_t next = bare.find_first_of(":.#", at);
+    std::string part = bare.substr(at, next == std::string::npos ? std::string::npos : next - at);
+    if (!part.empty()) parts.push_back(part);
+    if (next == std::string::npos) break;
+    at = next + 1;
+  }
+  return parts;
+}
+
+// Every definition of `id` under the root.
+static std::vector<Candidate> search_root(const std::string &id, const std::string &parent) {
+  search_root_for({id});
+  std::vector<Candidate> out = g_root_hits[id];
+  if (!parent.empty()) {
+    // Containers come from the files themselves, for the few candidates there are.
+    std::map<std::string, std::vector<Candidate>> by_file;
+    for (const auto &c : out) by_file[c.file];
+    out.clear();
+    for (auto &f : by_file) scan_lines(f.first, file_lines(f.first), id, parent, out);
+  }
+  return out;
+}
+
+// Where a name is: in its file when the plan gave one; else in the files the plan
+// mentions, in order; else anywhere under the root.
+static std::optional<Place> locate(const NameKey &k, const std::vector<std::string> &mentioned) {
+  if (k.name.empty()) {
+    std::string f = find_file(k.file);
+    if (f.empty()) return std::nullopt;
+    return Place{f, k.line, k.end};
+  }
+  std::vector<std::string> parts = name_parts(k.name);
+  if (parts.empty()) return std::nullopt;
+  std::string id = parts.back(), parent = parts.size() > 1 ? parts[parts.size() - 2] : "";
+
+  auto in_file = [&](const std::string &given) {  // every file the name can mean
+    std::vector<Candidate> found;
+    for (const auto &f : find_files(given)) scan_lines(f, file_lines(f), id, parent, found);
+    return found;
+  };
+  std::optional<Candidate> c;
+  if (!k.file.empty()) {
+    c = pick(in_file(k.file), parent);
+  } else {
+    // A qualified name is looked for inside its qualifier everywhere before anywhere else.
+    std::vector<std::vector<Candidate>> local;
+    for (const auto &m : mentioned) local.push_back(in_file(m));
+    std::optional<std::vector<Candidate>> root;
+    for (bool strict : parent.empty() ? std::vector<bool>{false} : std::vector<bool>{true, false}) {
+      for (const auto &found : local)
+        if ((c = pick(found, parent, strict))) break;
+      if (c) break;
+      if (!root) root = search_root(id, parent);
+      if ((c = pick(*root, parent, strict))) break;
+    }
+  }
+  if (!c) return std::nullopt;
+  return Place{c->file, c->line, 0};
+}
+
+static std::optional<Place> place_of(const NameKey &k, const std::vector<std::string> &mentioned) {
+  auto found = g_places.find(k.id());
+  if (found != g_places.end()) return found->second;
+  return g_places[k.id()] = locate(k, mentioned);
+}
+
+// The lines a hover shows: the range the plan gave, or from the definition down to where
+// its first block closes, at most 15 lines, with their common indent taken off.
+static std::string hover_markdown(const Place &p) {
+  std::vector<std::string> lines = file_lines(p.file);
+  if (lines.empty()) return "";
+  size_t from = p.line > 0 ? static_cast<size_t>(p.line - 1) : 0, to;
+  if (from >= lines.size()) return "";
+  if (p.end >= p.line && p.line > 0) {
+    to = std::min({lines.size(), static_cast<size_t>(p.end), from + 30});
+  } else {
+    to = std::min(lines.size(), from + 15);
+    int depth = 0;
+    bool opened = false;
+    for (size_t n = from; n < to; n++) {
+      for (char ch : lines[n]) {
+        if (ch == '{') { depth++; opened = true; }
+        else if (ch == '}') depth--;
+      }
+      if (opened && depth <= 0) { to = n + 1; break; }
+    }
+  }
+  size_t indent = std::string::npos;
+  for (size_t n = from; n < to; n++) {
+    size_t at = lines[n].find_first_not_of(" \t");
+    if (at != std::string::npos) indent = std::min(indent, at);
+  }
+  std::string body;
+  for (size_t n = from; n < to; n++)
+    body += (indent != std::string::npos && lines[n].size() > indent ? lines[n].substr(indent) : "") + "\n";
+  std::string lang = p.file.substr(p.file.find_last_of('.') + 1);
+  std::string fence = body.find("```") == std::string::npos ? "```" : "~~~~";
+  return fence + lang + "\n" + body + fence + "\n";
+}
+
+// PLAN_REVIEW_EDITOR opens the code: a command taking `path:line`, like `zed`, `code -g` or
+// `subl`. Unset, Zed when it is on the PATH, else VS Code, else the file's default app.
+static void open_in_editor(const Place &p) {
+  std::string path = g_root + "/" + p.file;
+  std::string target = shell_quote(p.line > 0 ? path + ":" + std::to_string(p.line) : path);
+  const char *editor = std::getenv("PLAN_REVIEW_EDITOR");
+  std::string cmd;
+  if (editor && *editor) cmd = std::string(editor) + " " + target;
+  else if (on_path("zed")) cmd = "zed " + target;
+  else if (on_path("code")) cmd = "code -g " + target;
+#ifdef __APPLE__
+  else cmd = "open " + shell_quote(path);
+#else
+  else cmd = "xdg-open " + shell_quote(path);
+#endif
+  std::system((cmd + " >/dev/null 2>&1 &").c_str());
+}
+
 // ---------------------------------------------------------------- http
 
 static std::atomic<bool> g_done{false};
@@ -539,6 +971,9 @@ static void set_leaving(bool leaving) {
 //   GET  <base>mermaid.min.js  for a viewer whose plan has diagrams
 //   POST <base>feedback        {verdict: approve | changes | end, leaving?, general,
 //                               comments: [{note, anchor: {kind, ...}}]}
+//   POST <base>resolve         {keys: [{file?, name?, line?, end?}], files} → [found?]
+//   POST <base>hover           a key → {markdown, where}
+//   POST <base>open            a key → opens it in the editor
 static void serve(int fd, std::string base, std::string page, std::string session) {
   std::string buf;
   size_t head_end;
@@ -577,7 +1012,8 @@ static void serve(int fd, std::string base, std::string page, std::string sessio
     return;
   }
 
-  if (method == "POST" && path == base + "feedback") {
+  JVal parsed;
+  if (method == "POST") {
     std::string lower = head;
     for (char &c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     size_t len = 0;
@@ -588,10 +1024,61 @@ static void serve(int fd, std::string base, std::string page, std::string sessio
     std::string body = buf.substr(head_end + 4);
     if (body.size() < len && !fill(fd, body, len)) { ::close(fd); return; }
     body.resize(len);
+    if (!parse_json(body, parsed)) {
+      reply(fd, "400 Bad Request", "application/json", "{}");
+      ::close(fd);
+      return;
+    }
+  }
 
-    JVal parsed;
+  // Names, for the browser page: which exist, a hover, and opening one in the editor.
+  if (method == "POST" && path == base + "resolve") {
+    std::vector<std::string> mentioned;
+    if (const JVal *files = parsed.get("files"))
+      for (const auto &f : files->arr) if (f.type == JVal::Str) mentioned.push_back(f.str);
+    std::string out = "[";
+    if (const JVal *keys = parsed.get("keys")) {
+      std::lock_guard<std::mutex> lock(g_lookup_mutex);
+      // Names without a file may need the whole root searched: all of them in one go.
+      std::vector<std::string> ids;
+      for (const auto &k : keys->arr) {
+        NameKey key = key_of(k);
+        std::vector<std::string> parts = name_parts(key.name);
+        if (key.file.empty() && !parts.empty() && !g_places.count(key.id())) ids.push_back(parts.back());
+      }
+      search_root_for(ids);
+      for (const auto &k : keys->arr) {
+        if (out.size() > 1) out += ',';
+        out += place_of(key_of(k), mentioned) ? "true" : "false";
+      }
+    }
+    reply(fd, "200 OK", "application/json", out + "]");
+    ::close(fd);
+    return;
+  }
+  if (method == "POST" && (path == base + "hover" || path == base + "open")) {
+    std::optional<Place> place;
+    {
+      std::lock_guard<std::mutex> lock(g_lookup_mutex);
+      place = place_of(key_of(parsed), {});
+    }
+    if (!place) {
+      reply(fd, "404 Not Found", "application/json", "null");
+    } else if (path == base + "hover") {
+      std::string where = place->file + (place->line > 0 ? ":" + std::to_string(place->line) : "");
+      reply(fd, "200 OK", "application/json",
+            "{\"markdown\":" + json_string(hover_markdown(*place)) + ",\"where\":" + json_string(where) + "}");
+    } else {
+      open_in_editor(*place);
+      reply(fd, "200 OK", "application/json", "{}");
+    }
+    ::close(fd);
+    return;
+  }
+
+  if (method == "POST" && path == base + "feedback") {
     std::string verdict;
-    if (!parse_json(body, parsed) || parsed.type != JVal::Obj ||
+    if (parsed.type != JVal::Obj ||
         ((verdict = parsed.text("verdict")) != "approve" && verdict != "changes" &&
          verdict != "end")) {
       reply(fd, "400 Bad Request", "application/json", "{}");
@@ -725,6 +1212,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "review: no such directory %s\n", root.c_str());
     return 2;
   }
+  g_root = code_root;
 
   g_assets = real_path(asset_dir());
   std::string page, marked;

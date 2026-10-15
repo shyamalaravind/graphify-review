@@ -87,7 +87,7 @@ the skill that sent you here asks for a tab title, exactly as given, and keep
 it the same every round.
 
 Run it from the project the plan is about: that git repository is the code
-an editor viewer opens and looks names up in. If the plan is about code
+every viewer looks names up in. If the plan is about code
 somewhere else, pass `--root <dir>`.
 
 It compiles on first use (about a second, once) and from then on starts
