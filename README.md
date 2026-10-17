@@ -125,6 +125,7 @@ A comment's `anchor` says what it's about: `{kind: "quote", quote}` for prose, `
 
 The two skills share no files, so each can be linked on its own.
 
+- `ARCHITECTURE.md`: how both skills work, written in the plan format. Open it as a canvas with `skill/graphify-review/review ARCHITECTURE.md`.
 - `skill/plan-review/`: the classic review.
   - `SKILL.md`: instructions the agent follows.
   - `review`: launcher. Compiles the server on first use (or after `review.cpp` changes) into `bin/review`, then runs it.
