@@ -618,9 +618,10 @@ static const Shapes &shapes_for(const std::string &id) {
 static const std::regex kAfterParams("^\\s*(?:\\{|:|->|(?:const|override|final|noexcept|mutable|throws|where)\\b)");
 
 // Words after which a name is used, not defined: `return foo(`, `new Foo(`, `if foo`.
+// Not `void`: JavaScript's operator is rare, and C, C++, Java and C# define with it.
 static bool control_word(const std::string &w) {
   static const char *words[] = {"return", "await", "new", "throw", "yield", "typeof", "delete", "case", "else",
-                                "if", "while", "for", "switch", "do", "in", "of", "void", "and", "or", "not", "is", "as"};
+                                "if", "while", "for", "switch", "do", "in", "of", "and", "or", "not", "is", "as"};
   return std::any_of(std::begin(words), std::end(words), [&](const char *x) { return w == x; });
 }
 
