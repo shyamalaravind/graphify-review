@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -442,12 +443,14 @@ static std::string session_key(const std::string &name) {
 }
 
 // Written beside the target and renamed over it, so a viewer never reads half a file.
+// Readable by the user alone: a session file holds the review's URL, whose token guards it.
 static bool write_file(const std::string &path, const std::string &text) {
   std::string tmp = path + ".tmp" + std::to_string(::getpid());
   {
     std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
     if (!f || !(f << text)) return false;
   }
+  ::chmod(tmp.c_str(), 0600);
   return std::rename(tmp.c_str(), path.c_str()) == 0;
 }
 
@@ -928,6 +931,12 @@ static void send_all(int fd, const std::string &data) {
   }
 }
 
+static std::string g_origin;  // http://127.0.0.1:<port>, the one origin the page has
+// The page may load and reach nothing but this broker, so a plan's remote image doesn't
+// load and can't carry the plan's text off the machine in its URL. Its own scripts carry
+// the round's nonce, so a script slipped into the page any other way doesn't run.
+static std::string g_csp;
+
 static void reply(int fd, const std::string &status, const std::string &ctype,
                   const std::string &body) {
   std::ostringstream head;
@@ -935,8 +944,22 @@ static void reply(int fd, const std::string &status, const std::string &ctype,
        << "Content-Type: " << ctype << "\r\n"
        << "Content-Length: " << body.size() << "\r\n"
        << "Cache-Control: no-store\r\n"
-       << "Connection: close\r\n\r\n";
+       << "X-Content-Type-Options: nosniff\r\n"
+       << "Referrer-Policy: no-referrer\r\n";
+  if (ctype.rfind("text/html", 0) == 0) head << "Content-Security-Policy: " << g_csp << "\r\n";
+  head << "Connection: close\r\n\r\n";
   send_all(fd, head.str() + body);
+}
+
+// A request header's value, or nullopt when it isn't sent. `name` is in lower case.
+static std::optional<std::string> header(const std::string &head, const std::string &name) {
+  std::string lower = head;
+  for (char &c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  size_t at = lower.find("\r\n" + name + ":");
+  if (at == std::string::npos) return std::nullopt;
+  at += name.size() + 3;
+  size_t end = head.find("\r\n", at);
+  return trim(head.substr(at, end == std::string::npos ? std::string::npos : end - at));
 }
 
 // Reads until `want` bytes are buffered, or the peer hangs up.
@@ -994,6 +1017,17 @@ static void serve(int fd, std::string base, std::string page, std::string sessio
   std::istringstream rl(first);
   std::string method, path;
   rl >> method >> path;
+
+  // Only the page this broker served may use it, even with the path's token, in case that
+  // leaked: a request for any other host is DNS rebinding (a site's own name pointed at
+  // 127.0.0.1), and a POST from any other origin is another site's page.
+  std::optional<std::string> origin = header(head, "origin");
+  if (header(head, "host") != g_origin.substr(std::strlen("http://")) ||
+      (method == "POST" && origin && *origin != g_origin)) {
+    reply(fd, "403 Forbidden", "text/plain; charset=utf-8", "forbidden");
+    ::close(fd);
+    return;
+  }
 
   if (method == "GET" && (path == base || path == base + "session")) {
     set_leaving(false);  // the viewer is back (a reload): cancel any pending end
@@ -1188,7 +1222,6 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "review: page.html or marked.min.js not found in %s\n", g_assets.c_str());
     return 1;
   }
-  replace_first(page, "/*MARKED*/", marked);
 
   int server = ::socket(AF_INET, SOCK_STREAM, 0);
   if (server < 0) {
@@ -1212,11 +1245,22 @@ int main(int argc, char **argv) {
   int port = ntohs(addr.sin_port);
 
   std::string base = "/" + token(22) + "/";
-  std::string url = "http://127.0.0.1:" + std::to_string(port) + base;
+  g_origin = "http://127.0.0.1:" + std::to_string(port);
+  std::string url = g_origin + base;
+
+  // Each script in the page carries this round's nonce, the only inline script the CSP runs.
+  std::string nonce = token(22), tagged = "<script nonce=\"" + nonce + "\">";
+  for (size_t at = 0; (at = page.find("<script>", at)) != std::string::npos; at += tagged.size())
+    page.replace(at, std::strlen("<script>"), tagged);
+  replace_first(page, "/*MARKED*/", marked);
+  g_csp = "default-src 'self'; script-src 'self' 'nonce-" + nonce + "'; style-src 'self' 'unsafe-inline'; "
+          "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+          "form-action 'none'; frame-ancestors 'none'";
 
   std::string dir = sessions_dir();
   std::error_code ec;
   std::filesystem::create_directories(dir, ec);
+  ::chmod(dir.c_str(), 0700);
   int round = next_round(dir, key);
   std::string session = "{\"key\":" + json_string(key) + ",\"name\":" + json_string(name) +
                         ",\"title\":" + json_string(title) + ",\"text\":" + json_string(plan) +
@@ -1245,6 +1289,11 @@ int main(int argc, char **argv) {
         if (errno == EINTR) continue;
         return;
       }
+      // A connection that stops sending or reading is dropped after 5 s rather than
+      // holding its thread for the rest of the review. Everything is local: 5 s is plenty.
+      timeval limit{5, 0};
+      ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit));
+      ::setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof(limit));
       std::thread(serve, client, base, page, session).detach();
     }
   }).detach();

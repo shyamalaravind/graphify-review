@@ -90,6 +90,10 @@ sequenceDiagram
   moves the binary into place, so a broker that's running is never overwritten.
 - The URL's path is a random 22-character token, so another local page can't read the
   plan or post feedback.
+- The broker also answers only requests addressed to 127.0.0.1 and its port, refuses a
+  POST from another page's origin, and sends the page a Content-Security-Policy, so the
+  page loads and sends nothing off the machine: a plan's remote image doesn't load.
+  Session files are readable by you alone, and a quiet connection is dropped after 5 s.
 - Closing the tab is an answer too: the page sends an end marked as leaving, and the
   broker holds it 2 seconds, so a reload takes the review back.
 - A broker that's killed removes its session file in its signal handler, so no viewer

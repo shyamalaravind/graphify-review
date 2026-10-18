@@ -102,6 +102,8 @@ The file goes when the round ends, and `<key>.round` beside it then holds the ro
 
 A comment's `anchor` says what it's about: `{kind: "quote", quote}` for prose, `{kind: "diagram", diagram, node?, quote}` for a diagram (numbered from 1) and the node in it, `{kind: "code", file, start, end, quote}` for lines of code. `{verdict: "end", leaving: true}` means the viewer went away: the broker waits two seconds for it to come back (a reload) before ending the review.
 
+The broker answers only requests addressed to `127.0.0.1:<port>` (the `Host` header), and refuses with 403 a POST whose `Origin` is another page's, so neither another website nor DNS rebinding can use it, even with the URL. The page comes with a Content-Security-Policy that lets it load and reach nothing but the broker, so a plan's remote images don't load. Session files are readable by you alone, and a connection that goes quiet for 5 seconds is dropped.
+
 ## Layout
 
 The two skills share no files, so each can be linked on its own.
