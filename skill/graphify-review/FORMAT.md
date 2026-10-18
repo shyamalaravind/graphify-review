@@ -1,9 +1,9 @@
 # The plan format
 
 How to write a plan that changes code, so the reviewer can read it as a picture first
-and every name in it leads to the code. Every viewer draws the diagrams and resolves each
-name, so hovering it shows its definition and clicking it opens it: the browser by
-searching the code's text, VS Code through the language servers.
+and every name in it leads to the code. The review draws the diagrams and finds each
+name in the code's text, so hovering it shows its definition and clicking it opens it in
+your editor.
 
 Plans that don't change code (a resume, a write-up) need none of this.
 

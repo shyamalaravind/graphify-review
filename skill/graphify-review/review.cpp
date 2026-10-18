@@ -409,7 +409,7 @@ static std::string real_path(const std::string &path) {
 }
 
 // --root if given. Otherwise the top of the git repository the review runs in, or the
-// directory itself outside one: the code the plan is about, which an editor viewer opens.
+// directory itself outside one: the code the plan is about, where its names are looked up.
 static std::string find_root(const std::string &given) {
   if (!given.empty()) return real_path(given);
   std::string top = trim(capture("git rev-parse --show-toplevel 2>/dev/null"));
@@ -418,7 +418,7 @@ static std::string find_root(const std::string &given) {
 
 // ---------------------------------------------------------------- sessions
 
-// $XDG_STATE_HOME/plan-review: the sessions, and the review instance of VS Code.
+// $XDG_STATE_HOME/plan-review, where the sessions are.
 static std::string state_dir() {
   const char *state = std::getenv("XDG_STATE_HOME");
   const char *home = std::getenv("HOME");
@@ -1141,44 +1141,6 @@ static bool open_browser(const std::string &url) {
 #endif
 }
 
-// VS Code's language servers only answer for a folder it has open, so its window for the
-// root comes first (focused, or opened). With the review instance that vscode/install.sh
-// sets up — a VS Code of its own with only the Plan Viewer and lean settings — the folder
-// opens there, and the viewer shows the review waiting for its folder by itself. Without
-// it, the user's own VS Code opens the folder and the session goes to it by URI.
-static bool open_vscode(const std::string &root, const std::string &key) {
-  if (std::system("command -v code >/dev/null 2>&1") != 0) return false;
-  std::string instance = state_dir() + "/vscode";
-  struct stat st;
-  if (::stat((instance + "/data/User/settings.json").c_str(), &st) == 0)
-    return std::system(("code --user-data-dir " + shell_quote(instance + "/data") +
-                        " --extensions-dir " + shell_quote(instance + "/extensions") + " " +
-                        shell_quote(root) + " >/dev/null 2>&1").c_str()) == 0;
-  std::string uri = "vscode://shyamalaravind.plan-viewer/session?key=" + key;
-  if (std::system(("code " + shell_quote(root) + " >/dev/null 2>&1").c_str()) != 0)
-    return false;
-#ifdef __APPLE__
-  return std::system(("open " + shell_quote(uri) + " >/dev/null 2>&1").c_str()) == 0;
-#else
-  return std::system(("xdg-open " + shell_quote(uri) + " >/dev/null 2>&1").c_str()) == 0;
-#endif
-}
-
-// PLAN_REVIEW_VIEWER picks where the review opens: "browser" (the default) or "vscode".
-// A viewer that is already running can also pick the session up from its file.
-static void launch_viewer(const std::string &url, const std::string &root, const std::string &key) {
-  const char *viewer = std::getenv("PLAN_REVIEW_VIEWER");
-  std::string want = viewer ? viewer : "";
-  if (want == "vscode") {
-    if (open_vscode(root, key)) return;
-    std::fprintf(stderr, "review: can't open VS Code; using the browser\n");
-  } else if (!want.empty() && want != "browser") {
-    std::fprintf(stderr, "review: unknown PLAN_REVIEW_VIEWER %s; using the browser\n", viewer);
-  }
-  if (!open_browser(url))
-    std::fprintf(stderr, "review: open the URL above in your browser\n");
-}
-
 // ---------------------------------------------------------------- main
 
 int main(int argc, char **argv) {
@@ -1285,7 +1247,9 @@ int main(int argc, char **argv) {
 
   std::fprintf(stderr, "Review open at %s\n", url.c_str());
   std::fflush(stderr);
-  launch_viewer(url, code_root, key);
+  // A viewer that is already running can also pick the session up from its file.
+  if (!open_browser(url))
+    std::fprintf(stderr, "review: open the URL above in your browser\n");
 
   std::unique_lock<std::mutex> lock(g_mutex);
   while (!g_done.load()) {

@@ -18,8 +18,8 @@ graphify-review has three parts, and most of this canvas is about them:
    The agent only ever runs this.
 2. **The viewer**: one page, `skill/graphify-review/page.html`, in a browser tab. A name
    it shows hovers with its definition and opens in your editor when clicked. The VS Code
-   viewer that came before, `vscode/extension.js`, still works with
-   `PLAN_REVIEW_VIEWER=vscode`; it is in the archived frames at the end.
+   viewer that came before is archived in `archive/vscode/`; the archived frames at the
+   end show how it worked.
 3. **The plan format**, `skill/graphify-review/FORMAT.md`: how the agent writes a plan so
    the page can draw it and link its names.
 
@@ -103,13 +103,13 @@ flowchart TD
   ROOT["find_root()<br/>the code the plan is about"]
   RND["next_round()<br/>round 1, 2… under the plan's key"]
   SRV["serve()<br/>one thread per connection"]
-  VIEW["the viewer opens<br/>frame 4"]
+  VIEW["the browser opens<br/>frame 4"]
   NAMES["names → code<br/>frame 6"]
   FIN["finish()<br/>the first verdict wins"]
   REN["render()<br/>the text the agent reads"]
   MAIN --> ROOT
   MAIN --> RND
-  MAIN -->|"url, root, key"| VIEW
+  MAIN -->|"url"| VIEW
   MAIN -->|"accept loop"| SRV
   SRV -->|"POST resolve, hover, open"| NAMES
   SRV -->|"POST feedback"| FIN
@@ -118,7 +118,7 @@ flowchart TD
 ```
 
 - **`main()`** (`graphify-review/review.cpp`): reads the plan, builds the page once
-  (marked pasted in at its placeholder), listens on port 0, opens the viewer, then sleeps
+  (marked pasted in at its placeholder), listens on port 0, opens the browser, then sleeps
   until a verdict arrives or the viewer has been gone 2 seconds.
 - **`find_root()`** (`graphify-review/review.cpp`): `--root`, else the top of the git
   repository the review runs in, else the current folder. Names are looked up here.
@@ -137,28 +137,23 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  LV["launch_viewer()<br/>reads PLAN_REVIEW_VIEWER"]
+  ANN["the session is announced<br/>Review open at URL, on stderr"]
   OB["open_browser()<br/>reads PLAN_REVIEW_BROWSER"]
-  OV["open_vscode()<br/>archived"]
   BRAVE["open -a Brave Browser URL<br/>the setting here"]
   DEF["open URL<br/>the default browser"]
-  EXT["the Plan Viewer extension<br/>archived frames A and B"]
-  LV -->|"browser, the default"| OB
-  LV -->|"vscode"| OV
-  OV -.->|"no code command"| OB
+  HAND["you open the URL<br/>when no browser would"]
+  ANN --> OB
   OB -->|"set"| BRAVE
   OB -->|"unset, or not found"| DEF
-  OV --> EXT
+  OB -.->|"fails"| HAND
 ```
 
-- **`launch_viewer()`** (`graphify-review/review.cpp`): `browser`, the default and the
-  viewer in use, or `vscode`, the archived one. Anything that fails falls back to the
-  browser, and the URL is always printed.
 - **`open_browser()`** (`graphify-review/review.cpp`): an app name on macOS, a command on
-  Linux. Here it's Brave, so reviews stay out of the default browser.
-- **`open_vscode()`** (`graphify-review/review.cpp`): opens the root in the review
-  instance that `vscode/install.sh` sets up, or in your own VS Code with the session
-  handed over by URI.
+  Linux. Here it's Brave, so reviews stay out of the default browser. The URL is printed
+  first, so a review that no browser opens can still be reached.
+
+Before the archive, `PLAN_REVIEW_VIEWER=vscode` opened the review in VS Code here instead
+(archived frames A and B).
 
 ## 5. The page: one round on the canvas
 
@@ -188,8 +183,8 @@ flowchart TD
 
 - **`host.session()`** (`graphify-review/page.html`): the page never talks to the broker
   itself, only to `host`. In a browser tab that's the default object here, which calls
-  the broker that served the page. The archived VS Code viewer sets `window.planHost`
-  first and answers the same calls itself.
+  the broker that served the page. A viewer that hosts the page itself, as the archived
+  VS Code viewer did, sets `window.planHost` first and answers the same calls.
 - **`show()`** (`graphify-review/page.html`): resets the page for a round, renders the
   plan with marked, and turns each mermaid block into a diagram waiting to be drawn.
 - **`findNames()`** (`graphify-review/page.html`): wraps each name written in the plan
@@ -199,8 +194,9 @@ flowchart TD
 - **`frames()`** (`graphify-review/page.html`): the text before the first heading is the
   intro card, and each section a frame.
 - **`resolveNames()`** (`graphify-review/page.html`): asks once for all names, with the
-  files the plan mentions as places to look first. The broker answers the first time;
-  the retries at 3, 10 and 30 seconds are for language servers still starting.
+  files the plan mentions as places to look first. The broker answers the first time and
+  keeps its misses, so the retries at 3, 10 and 30 seconds cost nothing; they were for
+  the archived viewer's language servers, still starting.
 - **`addComment()`** (`graphify-review/page.html`): `anchorOf()` says what a comment is
   about: quoted prose, or a diagram and its box.
 - **`submit()`** (`graphify-review/page.html`): sends the verdict. Closing the tab sends an
@@ -278,7 +274,7 @@ graphify-review's broker began as this one, before sessions, viewers and names:
 - One page in one response: the plan and the markdown renderer are pasted into the HTML,
   so the tab makes no other request.
 - One way back, `POST submit`, with the same verdicts and the same text for the agent.
-- No session files, rounds, VS Code or code lookup: about 600 lines against 1,300.
+- No session files, rounds or code lookup: about 600 lines against 1,300.
 
 ## 8. Why it's built this way
 
@@ -317,8 +313,8 @@ The switch was for memory: the browser gives up the types in a hover and keeps e
 
 ## Archived A. Names → code in VS Code, through the language servers
 
-The VS Code viewer, before the browser took over. Its code is still in `vscode/`, and it
-runs with `PLAN_REVIEW_VIEWER=vscode`.
+The VS Code viewer, before the browser took over. Its code is in `archive/vscode/`, and
+`archive/vscode/README.md` says how to run it again.
 
 ```mermaid
 flowchart TD
@@ -343,21 +339,21 @@ flowchart TD
   HD -->|"open"| RV
 ```
 
-- **`BRIDGE`** (`vscode/extension.js`): put in front of the page in the webview, it turns
-  each `host` call into a message to the extension and back. The page is the same file
-  the browser shows, loaded from the skill's folder.
-- **`Review.handle()`** (`vscode/extension.js`): session and feedback go on to the broker
-  over HTTP; resolve, hover and open it answers itself.
-- **`Review.locate()`** (`vscode/extension.js`): keeps each answer for the round, but not
-  a miss: the language server may still be starting.
-- **`Review.find()`** (`vscode/extension.js`): the broker's order, through the language
-  servers: the file given, the files the plan mentions, then the workspace.
-- **`Review.fileSymbols()`** (`vscode/extension.js`): document symbols work even where
-  workspace search can't, as in plain JavaScript with no jsconfig.
-- **`Review.hover()`** (`vscode/extension.js`): the language server's own hover, with the
-  types and docs the browser can't show.
-- **`Review.reveal()`** (`vscode/extension.js`): opens the code beside the plan. The price
-  is the language servers: about 2.8 GB on a large Angular repository.
+- **`BRIDGE`** (`archive/vscode/extension.js`): put in front of the page in the webview,
+  it turns each `host` call into a message to the extension and back. The page is the
+  same file the browser shows, loaded from the skill's folder.
+- **`Review.handle()`** (`archive/vscode/extension.js`): session and feedback go on to
+  the broker over HTTP; resolve, hover and open it answers itself.
+- **`Review.locate()`** (`archive/vscode/extension.js`): keeps each answer for the round,
+  but not a miss: the language server may still be starting.
+- **`Review.find()`** (`archive/vscode/extension.js`): the broker's order, through the
+  language servers: the file given, the files the plan mentions, then the workspace.
+- **`Review.fileSymbols()`** (`archive/vscode/extension.js`): document symbols work even
+  where workspace search can't, as in plain JavaScript with no jsconfig.
+- **`Review.hover()`** (`archive/vscode/extension.js`): the language server's own hover,
+  with the types and docs the browser can't show.
+- **`Review.reveal()`** (`archive/vscode/extension.js`): opens the code beside the plan.
+  The price is the language servers: about 2.8 GB on a large Angular repository.
 
 ## Archived B. How VS Code finds a review, and when it closes
 
@@ -383,22 +379,22 @@ flowchart TD
   ST -->|"nothing waiting here"| LW
 ```
 
-- **`activate()`** (`vscode/extension.js`): watches the sessions folder, takes the
-  broker's URI, and brings back a review tab VS Code had open when it quit, if its round
-  is still waiting.
-- **`refresh()`** (`vscode/extension.js`): a new round reloads its tab, a round that ended
-  elsewhere is marked ended, and the status bar counts reviews not shown here.
-- **`readSession()`** (`vscode/extension.js`): a session whose broker's pid is dead is
-  ignored.
-- **`extension.js: Review`** (`vscode/extension.js`): one webview tab per plan, kept alive
-  while hidden.
-- **`Review.revise()`** (`vscode/extension.js`): round 2 reloads the same tab.
-- **`verdictOf()`** (`vscode/extension.js`): KEY.round holds the round, and once it ends,
-  its verdict on a second line, so a window tells finished from coming back.
-- **`settle()`** (`vscode/extension.js`): a review window with nothing waiting closes
-  after 1.5 s, or 10 minutes after you request changes, if no revision came.
-- **`liveWindows()`** (`vscode/extension.js`): the last review window quits the instance,
-  which on macOS would otherwise keep running with no window.
+- **`activate()`** (`archive/vscode/extension.js`): watches the sessions folder, takes
+  the broker's URI, and brings back a review tab VS Code had open when it quit, if its
+  round is still waiting.
+- **`refresh()`** (`archive/vscode/extension.js`): a new round reloads its tab, a round
+  that ended elsewhere is marked ended, and the status bar counts reviews not shown here.
+- **`readSession()`** (`archive/vscode/extension.js`): a session whose broker's pid is
+  dead is ignored.
+- **`extension.js: Review`** (`archive/vscode/extension.js`): one webview tab per plan,
+  kept alive while hidden.
+- **`Review.revise()`** (`archive/vscode/extension.js`): round 2 reloads the same tab.
+- **`verdictOf()`** (`archive/vscode/extension.js`): KEY.round holds the round, and once
+  it ends, its verdict on a second line, so a window tells finished from coming back.
+- **`settle()`** (`archive/vscode/extension.js`): a review window with nothing waiting
+  closes after 1.5 s, or 10 minutes after you request changes, if no revision came.
+- **`liveWindows()`** (`archive/vscode/extension.js`): the last review window quits the
+  instance, which on macOS would otherwise keep running with no window.
 
 The review instance is a separate VS Code (`--user-data-dir`), not a profile, because
 `--profile` ties the folder to that profile for good.

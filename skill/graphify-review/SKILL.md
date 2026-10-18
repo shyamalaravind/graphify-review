@@ -1,12 +1,12 @@
 ---
 name: graphify-review
-description: Open the current plan (or any markdown file) as a canvas of diagrams, in the browser or VS Code, so the user can comment on its prose, its diagram nodes or lines of the code it names, then act on the feedback they send back. Writes a plan that changes code in the FORMAT.md shape first (a code-flow flowchart with a description entry per changed node). Use only when the user asks for it by name (e.g. /graphify-review, "graphify review", "graphify this plan"). A plain plan review, and the automatic review before leaving plan mode, belong to plan-review.
+description: Open the current plan (or any markdown file) as a canvas of diagrams in the browser, so the user can comment on its prose and its diagram nodes, then act on the feedback they send back. Writes a plan that changes code in the FORMAT.md shape first (a code-flow flowchart with a description entry per changed node). Use only when the user asks for it by name (e.g. /graphify-review, "graphify review", "graphify this plan"). A plain plan review, and the automatic review before leaving plan mode, belong to plan-review.
 argument-hint: "[file.md]"
 ---
 
 # Graphify review
 
-The user wants to review a plan as a picture: one canvas in the browser or VS Code, with
+The user wants to review a plan as a picture: one canvas in the browser, with
 the intro as a card, each `##` section a frame, and each flowchart box carrying its
 description inside it.
 
@@ -81,20 +81,19 @@ skill's directory:
 <this-skill-dir>/review <file> [--title "<tab title>"] [--root <dir>]
 ```
 
-`--title` names the review (the browser tab or editor tab, and the page
+`--title` names the review (the browser tab and the page
 header); without it they show the file's name. Pass it whenever the user or
 the skill that sent you here asks for a tab title, exactly as given, and keep
 it the same every round.
 
 Run it from the project the plan is about: that git repository is the code
-every viewer looks names up in. If the plan is about code
+the review looks names up in. If the plan is about code
 somewhere else, pass `--root <dir>`.
 
 It compiles on first use (about a second, once) and from then on starts
-instantly. It opens the user's viewer — the browser, or VS Code when they've
-set that up — and blocks until the user submits or ends the review. Each
-round of the same file is the same session, so a viewer that is still open
-shows the revised plan in place. Run it as a background command if your tool supports that,
+instantly. It opens the review in the user's browser and blocks until the user
+submits or ends the review. Each round of the same file is the next round
+of the same session. Run it as a background command if your tool supports that,
 and you'll be notified when it exits. Tell the user in one line that the
 review is open, then stop and don't poll. If background commands aren't
 supported, run it in the foreground with the longest timeout available.
@@ -124,5 +123,3 @@ Each comment says what it is about:
 - `On diagram 2, node "serve() GET session":` is about that node of the plan's
   second diagram; `On diagram 2: "…"` quotes other text in it, such as an edge
   label.
-- `On src/a.ts:12-14: "…"` is about those lines of the code, not the plan's
-  text: read them before you answer it.
