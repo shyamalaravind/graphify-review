@@ -49,23 +49,18 @@ body { margin: 0; overflow: hidden; background: var(--bg); color: var(--fg);
 .frame table { border-collapse: collapse; font-size: 14px; }
 .frame th, .frame td { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
 .name.live { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
-.diagram .name.live { color: var(--accent) !important; }  /* over Mermaid's label colour */
+.diagram .name.live { fill: var(--accent); text-decoration: underline; }  /* SVG text takes a fill, not a colour */
 ::highlight(review) { background: var(--mark); }
 
-/* ---- Diagrams, whose boxes carry their description entries. */
+/* ---- Diagrams, drawn by Pele in the page's colours, whose boxes carry their description entries. */
+.diagram { --pele-bg: var(--bg); --pele-fg: var(--fg); --pele-muted: var(--muted); --pele-line: var(--muted);
+  --pele-surface: var(--panel); --pele-surface-alt: var(--code); --pele-border: var(--accent);
+  --pele-accent: var(--accent); --pele-radius: 6px; }
 .diagram svg { display: block; }
 .diagram.pending { white-space: pre-wrap; color: var(--muted); font: 13px/1.5 var(--mono); max-width: 600px; }
 .diagram.broken p { margin: 4px 0 0; color: var(--accent); font-size: 13px; }
-/* Mermaid measures labels while it draws, outside .diagram, so these apply page-wide.
-   A box with a description wraps at a card's width, so Mermaid sizes the box to the wrapped text. */
-foreignObject div:has(> .markdown-node-label) { display: block !important; white-space: normal !important;
-  width: max-content; max-width: 380px !important; }
-.markdown-node-label { white-space: normal; }
-.markdown-node-label p { margin: 0; text-align: left; line-height: 1.45; }
-.markdown-node-label strong:first-child { display: block; text-align: center; font-size: 15px;
-  padding: 2px 0 7px; margin-bottom: 7px; border-bottom: 1px solid var(--line); }
-.markdown-node-label strong:first-child + br { display: none; }  /* the title is a block already */
-.diagram g.node { cursor: default; }
+.diagram .rule { stroke: var(--line); }
+.diagram .pele-node { cursor: default; }
 
 /* ---- What floats over the canvas. */
 #title { position: fixed; top: 12px; left: 16px; z-index: 5; padding: 4px 10px; border-radius: 8px;
@@ -212,7 +207,7 @@ async function show(session) {
   diagrams = [...staging.querySelectorAll('pre > code.language-mermaid')].map(code => {
     const div = Object.assign(document.createElement('div'), { className: 'diagram pending', textContent: code.textContent });
     code.parentElement.replaceWith(div);
-    return { el: div, source: code.textContent, literals: new Map() };
+    return { el: div, source: code.textContent, literals: new Map(), cards: new Set() };
   });
   findNames(staging);
   describeNodes(staging);
@@ -220,7 +215,7 @@ async function show(session) {
   $('#done').hidden = true;
   $('#app').hidden = false;
   await drawDiagrams();
-  for (const d of diagrams) if (d.drawn) { findNames(d.el); wrapLiterals(d); }
+  for (const d of diagrams) if (d.drawn) { findNames(d.el); wrapLiterals(d); shapeCards(d); }
   arrange();
   resolveNames();
 }
@@ -271,10 +266,14 @@ function codeKey(text) {
   if (m && (m[1] || m[3] || /[A-Z_.:#]/.test(m[2].slice(1)))) return m[1] ? { file: m[1], name: m[2] } : { name: m[2] };
   return null;
 }
-function nameSpan(label, key) {
+// A name in a diagram is a tspan in its SVG text, and anywhere else a span.
+const SVG = 'http://www.w3.org/2000/svg';
+function nameSpan(label, key, svg = false) {
   const id = JSON.stringify(key);
   names.set(id, key);
-  const span = Object.assign(document.createElement('span'), { className: 'name', textContent: label });
+  const span = svg ? document.createElementNS(SVG, 'tspan') : document.createElement('span');
+  span.setAttribute('class', 'name');
+  span.textContent = label;
   span.dataset.key = id;
   return span;
 }
@@ -284,10 +283,11 @@ function findNames(el) {
   const html = document.body.namespaceURI, walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
   for (let n; (n = walk.nextNode());) {
     const p = n.parentElement;
-    if (p.namespaceURI === html && !p.closest('pre, .name, .diagram.pending, .diagram.broken')) nodes.push(n);
+    if (p.closest('pre, .name, .diagram.pending, .diagram.broken')) continue;
+    if (p.namespaceURI === html || p.localName === 'text' || p.localName === 'tspan') nodes.push(n);
   }
   for (const node of nodes) {
-    const code = node.parentElement;
+    const code = node.parentElement, svg = code.namespaceURI === SVG;
     if (code.localName === 'code' && code.childNodes.length === 1) {
       const key = codeKey(node.data);
       if (key) node.replaceWith(nameSpan(node.data, key));
@@ -296,7 +296,7 @@ function findNames(el) {
     const frag = document.createDocumentFragment();
     let last = 0;
     for (const m of node.data.matchAll(IN_TEXT)) {
-      frag.append(node.data.slice(last, m.index), nameSpan(m[0], keyOf(m)));
+      frag.append(node.data.slice(last, m.index), nameSpan(m[0], keyOf(m), svg));
       last = m.index + m[0].length;
     }
     if (last) { frag.append(node.data.slice(last)); node.replaceWith(frag); }
@@ -304,15 +304,15 @@ function findNames(el) {
 }
 
 // ---- Descriptions on the diagram. A list item that starts with a box's name is that box's
-// description: it moves into the box, which Mermaid then sizes to hold it, and leaves the text.
+// description: it moves into the box, which Pele then sizes to hold it, and leaves the text.
 const SHAPE = /\b([A-Za-z_][\w-]*)(\[\[|\[\(|\(\[|\(\(|\{\{|\[|\(|\{)"([^"]*)"(\]\]|\)\]|\]\)|\)\)|\}\}|\]|\)|\})/g;
 const mermaidText = s => s.replace(/#/g, '#35;').replace(/"/g, '#quot;').replace(/</g, '#lt;')
   .replace(/>/g, '#gt;').replace(/`/g, "'");
 const labelText = label => label.replace(/<br\s*\/?>/gi, '\n').replace(/#(\w+);/g, (m, e) =>
   ({ quot: '"', lt: '<', gt: '>', amp: '&' })[e] ?? (/^\d+$/.test(e) ? String.fromCharCode(+e) : m));
 
-// An entry as the text Mermaid's markdown labels take: bold kept, code spans as plain
-// text, nested items as bullet lines.
+// An entry as the text a markdown label takes: bold kept, code spans as plain text,
+// nested items as bullet lines.
 function entryText(li, skip) {
   const out = [];
   const walk = (node, depth) => {
@@ -353,13 +353,15 @@ function describeNodes(staging) {
       const li = m && entries.get(keyName(keyOf(m)));
       if (!li) return whole;
       used.add(li);
+      d.cards.add(id);
       // The entry's leading name is the box's title already.
       const lead = li.querySelector('.name');
       const skip = lead.closest('strong, b') && lead.closest('li') === li ? lead.closest('strong, b') : lead;
       for (const s of li.querySelectorAll('.name')) d.literals.set(s.textContent, s.dataset.key);
       const rest = labelText(label).split('\n').slice(1).join('\n');
       const body = [rest, entryText(li, skip)].filter(Boolean).join('\n');
-      return `${id}${open}"\`**${mermaidText(title)}**\n${mermaidText(body)}\`"${close}`;
+      // The blank line under the title is where shapeCards() draws its rule.
+      return `${id}${open}"\`**${mermaidText(title)}**\n\n${mermaidText(body)}\`"${close}`;
     });
   }
   for (const li of used) {
@@ -376,15 +378,49 @@ function wrapLiterals(d) {
   const pattern = new RegExp(labels.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
   const walk = document.createTreeWalker(d.el, NodeFilter.SHOW_TEXT), nodes = [];
   for (let n; (n = walk.nextNode());)
-    if (n.parentElement.closest('.markdown-node-label') && !n.parentElement.closest('.name')) nodes.push(n);
+    if (n.parentElement.closest('.pele-label') && !n.parentElement.closest('.name')) nodes.push(n);
   for (const node of nodes) {
     const frag = document.createDocumentFragment();
     let last = 0;
     for (const m of node.data.matchAll(pattern)) {
-      frag.append(node.data.slice(last, m.index), nameSpan(m[0], names.get(d.literals.get(m[0]))));
+      frag.append(node.data.slice(last, m.index), nameSpan(m[0], names.get(d.literals.get(m[0])), true));
       last = m.index + m[0].length;
     }
     if (last) { frag.append(node.data.slice(last)); node.replaceWith(frag); }
+  }
+}
+
+// Pele starts each line of a label with a tspan placed at x; what follows it without one,
+// such as a bold word, is on the same line.
+const lineStarts = label => [...label.children].filter(t => t.hasAttribute('x'));
+function labelLines(label) {
+  const lines = [];
+  for (const c of label.childNodes) {
+    if (!lines.length || (c.nodeType === 1 && c.hasAttribute('x'))) lines.push('');
+    lines[lines.length - 1] += c.textContent;
+  }
+  return lines;
+}
+
+// Pele centres every line of a label. A description reads as a card instead: its title
+// centred over a rule, and the lines under it left-aligned, as a block in the middle.
+function shapeCards(d) {
+  for (const g of d.el.querySelectorAll('.pele-node')) {
+    const label = g.querySelector('.pele-label');
+    if (!d.cards.has(g.dataset.id) || !label) continue;
+    g.classList.add('described');
+    // The title is the lines before the blank one, which a long title may push down.
+    const lines = lineStarts(label), blank = lines.findIndex(t => !t.textContent.trim());
+    if (blank < 1 || blank === lines.length - 1) continue;
+    // Measured while still centred: where each line starts, and so how wide it is.
+    const starts = lines.map(t => (t.getNumberOfChars() ? t.getStartPositionOfChar(0).x : 0));
+    const left = Math.min(...starts.slice(blank + 1)), edge = Math.min(left, ...starts.slice(0, blank));
+    label.setAttribute('text-anchor', 'start');
+    lines.forEach((t, i) => t.setAttribute('x', i < blank ? starts[i] : left));
+    const y = +lines[blank].getAttribute('y') - 0.35 * parseFloat(getComputedStyle(label).fontSize);
+    const rule = document.createElementNS(SVG, 'line');
+    for (const [k, v] of Object.entries({ class: 'rule', x1: edge, x2: -edge, y1: y, y2: y })) rule.setAttribute(k, v);
+    g.insertBefore(rule, label);
   }
 }
 
@@ -405,7 +441,7 @@ async function resolveNames() {
     });
     if (!wait) host.shown?.({ names: names.size, live: document.querySelectorAll('.name.live').length,
       diagrams: diagrams.filter(d => d.drawn).length,
-      described: document.querySelectorAll('.diagram .markdown-node-label strong:first-child').length });
+      described: document.querySelectorAll('.diagram .pele-node.described').length });
   }
 }
 
@@ -452,33 +488,12 @@ document.addEventListener('click', e => {
   host.open(names.get(name.dataset.key));
 }, true);
 
-// ---- Diagrams: ```mermaid blocks, drawn in the page's colours. A diagram that won't
-// parse keeps its source and says why.
-let mermaidReady = null;
-function loadMermaid() {
-  mermaidReady ??= new Promise((ok, fail) => document.head.append(Object.assign(
-    document.createElement('script'), { src: host.asset('mermaid.min.js'), onload: ok, onerror: fail })))
-    .then(() => {
-      const css = getComputedStyle(document.body), v = name => css.getPropertyValue(name).trim();
-      const wide = { useMaxWidth: false };
-      const dark = document.body.matches('.vscode-dark, .vscode-high-contrast')
-        || (!document.body.matches('.vscode-light') && matchMedia('(prefers-color-scheme: dark)').matches);
-      mermaid.initialize({
-        startOnLoad: false, securityLevel: 'strict', theme: 'base', fontFamily: css.fontFamily,
-        flowchart: { ...wide, wrappingWidth: 340 }, sequence: wide, class: wide, state: wide, er: wide,
-        themeVariables: {
-          darkMode: dark, fontSize: '14px',
-          background: v('--bg'), primaryColor: v('--panel'), primaryTextColor: v('--fg'),
-          primaryBorderColor: v('--accent'), lineColor: v('--muted'), secondaryColor: v('--code'),
-          tertiaryColor: v('--code'), clusterBkg: v('--code'), clusterBorder: v('--line'),
-          edgeLabelBackground: v('--bg'), noteBkgColor: v('--code'), noteTextColor: v('--fg'),
-          noteBorderColor: v('--line'), actorBkg: v('--panel'), actorBorder: v('--accent'),
-          actorTextColor: v('--fg'), signalColor: v('--muted'), signalTextColor: v('--fg'),
-        },
-      });
-    });
-  return mermaidReady;
-}
+// ---- Diagrams: ```mermaid blocks, drawn by Pele (pele.min.js) in the page's colours,
+// which it takes from the --pele-* variables, so a change of theme needs no redraw.
+// A diagram that won't parse keeps its source and says why.
+let peleReady = null;
+const loadPele = () => peleReady ??= new Promise((ok, fail) => document.head.append(Object.assign(
+  document.createElement('script'), { src: host.asset('pele.min.js'), onload: ok, onerror: fail })));
 async function drawDiagrams() {
   if (!diagrams.length) return;
   const failed = (d, why) => {
@@ -486,18 +501,21 @@ async function drawDiagrams() {
     d.el.replaceChildren(Object.assign(document.createElement('pre'), { textContent: d.source }),
       Object.assign(document.createElement('p'), { textContent: 'This diagram didn’t draw: ' + why }));
   };
-  try { await loadMermaid(); } catch {
-    diagrams.forEach(d => failed(d, 'Mermaid could not be loaded.'));
+  try { await loadPele(); } catch {
+    diagrams.forEach(d => failed(d, 'the diagram renderer could not be loaded.'));
     return;
   }
+  // At their own size, the canvas zooms them; no links or images, so nothing leaves the page.
+  const css = getComputedStyle(document.body);
+  const options = { fontFamily: css.fontFamily, fontFamilyMono: css.getPropertyValue('--mono').trim(), fontSize: 14,
+    responsive: false, autoDirection: false, links: false, images: false, config: { flowchart: { wrappingWidth: 340 } } };
   for (const [i, d] of diagrams.entries()) {
     try {
-      d.el.innerHTML = (await mermaid.render('diagram-' + i + '-' + Date.now(), d.source)).svg;
+      d.el.innerHTML = pele.render(d.source, { ...options, idPrefix: 'diagram-' + i + '-' }).svg;
       d.el.className = 'diagram';
       d.drawn = true;
     } catch (e) {
-      document.querySelectorAll('[id^="ddiagram-' + i + '-"]').forEach(el => el.remove());  // Mermaid's error drawing
-      failed(d, String(e.message || e).split('\n')[0]);
+      failed(d, (e.line ? 'line ' + e.line + ': ' : '') + String(e.message || e).split('\n')[0]);
     }
   }
 }
@@ -544,7 +562,7 @@ function arrange() {
   apply();
 }
 
-const TEXTY = 'p, li, td, th, h1, h2, h3, h4, pre, code, blockquote, .nodeLabel, .edgeLabel, .name, a, button';
+const TEXTY = 'p, li, td, th, h1, h2, h3, h4, pre, code, blockquote, text, .name, a, button';
 canvas.addEventListener('pointerdown', e => {
   if (e.button !== 0 && e.button !== 1) return;
   if (e.button === 0 && !space && e.target.closest(TEXTY)) return;  // text: select it, or click a name
@@ -588,13 +606,18 @@ $('#reopen').onclick = () => { $('#panel').classList.remove('closed'); $('#reope
 
 // ---- Comments, anchored to what they are about: prose they quote, a diagram (and the
 // box in it), or lines of code the editor host sends.
-const nodeTitle = g => (g.querySelector('.markdown-node-label strong')?.innerText
-  ?? g.querySelector('foreignObject div')?.innerText ?? g.textContent).replace(/\s+/g, ' ').trim();
+// A box goes by its title: a card's lines above the rule, or a plain box's whole label.
+const nodeTitle = g => {
+  const label = g.querySelector('.pele-label'), lines = label ? labelLines(label) : [g.textContent];
+  const blank = lines.findIndex(l => !l.trim());
+  return (g.classList.contains('described') && blank > 0 ? lines.slice(0, blank) : lines)
+    .join(' ').replace(/\s+/g, ' ').trim();
+};
 function anchorOf(range, quote) {
   const ends = [range.startContainer, range.endContainer].map(n => (n.nodeType === 1 ? n : n.parentElement));
   const where = ends.map(el => diagrams.findIndex(d => d.el.contains(el)));
   if (where[0] < 0 || where[0] !== where[1]) return { kind: 'quote', quote };
-  const nodes = ends.map(el => el.closest('g.node'));
+  const nodes = ends.map(el => el.closest('.pele-node'));
   const node = nodes[0] && nodes[0] === nodes[1] ? nodeTitle(nodes[0]) : '';
   return { kind: 'diagram', diagram: where[0] + 1, ...(node ? { node } : {}), quote };
 }
@@ -616,7 +639,7 @@ document.addEventListener('mouseup', e => {
 });
 // Double-clicking a box comments on the box as a whole.
 world.addEventListener('dblclick', e => {
-  const g = e.target.closest('g.node');
+  const g = e.target.closest('.pele-node');
   if (!g || sent) return;
   const d = diagrams.findIndex(x => x.el.contains(g));
   getSelection().removeAllRanges();

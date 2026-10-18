@@ -94,7 +94,7 @@ The file goes when the round ends, and `<key>.round` beside it then holds the ro
 | --- | --- |
 | `GET <url>` | the browser viewer |
 | `GET <url>session` | `{key, name, title, text, root, round}` |
-| `GET <url>mermaid.min.js` | the diagram renderer, for a page that has diagrams |
+| `GET <url>pele.min.js` | the diagram renderer, for a page that has diagrams |
 | `POST <url>feedback` | `{verdict, general, comments: [{note, anchor}]}`, where `verdict` is `approve`, `changes` or `end` |
 | `POST <url>resolve` | `{keys, files}` → which of the names exist in the code, as `[true, false, …]`; a key is `{file?, name?, line?, end?}`, and `files` are the ones the plan mentions, searched first |
 | `POST <url>hover` | a key → `{markdown, where}`: the lines of its definition, and `path:line` |
@@ -120,5 +120,5 @@ The two skills share no files, so each can be linked on its own.
   - `review.cpp`: the broker — C++17, standard library and POSIX sockets only.
   - `page.html`: the canvas page.
   - `marked.min.js`: marked v12.0.2, as above.
-  - `mermaid.min.js`: a bundled copy of [Mermaid](https://github.com/mermaid-js/mermaid) v11.17.2 (MIT) that draws the diagrams.
+  - `pele.min.js`: a bundled copy of [Pele](https://github.com/obsidianmd/pele) v1.6.0 (MIT), its `dist/pele.global.js`, that draws the diagrams. It reads Mermaid's syntax, so plans still use ```` ```mermaid ```` blocks.
 - `archive/vscode/`: graphify-review's VS Code viewer, archived. Its README says how it worked and how to run it again.

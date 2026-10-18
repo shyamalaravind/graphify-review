@@ -126,8 +126,8 @@ flowchart TD
   and the same plan back within a day is the next round. The session file is written
   beside the target and renamed over it, so a viewer never reads half of it.
 - **`serve()`** (`graphify-review/review.cpp`): one request per connection. GETs serve the
-  page, the session and Mermaid (3.5 MB, so it's fetched, not built in); POSTs carry
-  JSON, read by the broker's own small parser.
+  page, the session and Pele, the diagram renderer, which only a plan with diagrams
+  fetches; POSTs carry JSON, read by the broker's own small parser.
 - **`finish()`** (`graphify-review/review.cpp`): the first verdict wins and wakes
   `main()`. A viewer that went away sets `set_leaving()` instead, which a reload clears.
 - **`render()`** (`graphify-review/review.cpp`): the verdict and each numbered comment,
@@ -165,6 +165,7 @@ flowchart TD
   DN["describeNodes()"]
   FR["frames()"]
   DD["drawDiagrams()"]
+  SC["shapeCards()"]
   RN["resolveNames()"]
   HOST["host.resolve()<br/>then host.hover() and host.open()"]
   AC["addComment()"]
@@ -174,7 +175,8 @@ flowchart TD
   FN --> DN
   DN --> FR
   FR --> DD
-  DD -->|"canvas arranged"| RN
+  DD --> SC
+  SC -->|"canvas arranged"| RN
   RN -->|"which names exist"| HOST
   SH -.->|"select text, or double-click a box"| AC
   AC -->|"Approve or Request changes"| SUB
@@ -188,11 +190,16 @@ flowchart TD
 - **`show()`** (`graphify-review/page.html`): resets the page for a round, renders the
   plan with marked, and turns each mermaid block into a diagram waiting to be drawn.
 - **`findNames()`** (`graphify-review/page.html`): wraps each name written in the plan
-  format, in prose and in drawn boxes, in a span carrying its key.
+  format in a span carrying its key: in prose an HTML span, in a drawn box an SVG tspan.
 - **`describeNodes()`** (`graphify-review/page.html`): a list item that starts with a
   box's name moves into that box, which is what turns these flowcharts into cards.
 - **`frames()`** (`graphify-review/page.html`): the text before the first heading is the
   intro card, and each section a frame.
+- **`drawDiagrams()`** (`graphify-review/page.html`): Pele (`pele.min.js`) draws each
+  block as SVG, all nine here in under 10 ms, in the page's colours through its
+  `--pele-*` variables, so a change to dark mode needs no redraw.
+- **`shapeCards()`** (`graphify-review/page.html`): Pele centres every line, so a box with
+  a description gets its title over a rule and its lines left-aligned under it.
 - **`resolveNames()`** (`graphify-review/page.html`): asks once for all names, with the
   files the plan mentions as places to look first. The broker answers the first time and
   keeps its misses, so the retries at 3, 10 and 30 seconds cost nothing; they were for
@@ -281,8 +288,11 @@ graphify-review's broker began as this one, before sessions, viewers and names:
 - RAM is the measure. A browser review costs the broker (1.5 to 7 MB in testing) and one
   tab; VS Code's language servers took about 2.8 GB on a large Angular repository even in
   the lean review instance, and about 7 GB in a VS Code with a full set of extensions.
+- Pele, not Mermaid, draws the diagrams. On this canvas it draws all nine in under 10 ms,
+  where Mermaid took 110 to 150, from 680 KB of JavaScript against 3.5 MB, and the tab's
+  JavaScript heap is 4.3 MB against 8.1 MB.
 - Nothing to install but a C++17 compiler: the standard library and POSIX sockets, marked
-  and Mermaid bundled, everything offline on 127.0.0.1.
+  and Pele bundled, everything offline on 127.0.0.1.
 - Any agent that reads SKILL.md can use it (Claude Code, Codex, Gemini CLI, Cursor),
   because all it does is run one command and read its output.
 - A viewer is anything that speaks the session protocol: find the session file, then GET

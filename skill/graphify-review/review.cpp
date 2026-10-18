@@ -831,8 +831,11 @@ static std::optional<Place> locate(const NameKey &k, const std::vector<std::stri
     c = pick(in_file(k.file), parent);
   } else {
     // A qualified name is looked for inside its qualifier everywhere before anywhere else.
+    // Minified code is skipped here as under the root: one long line that mentions
+    // every name and defines none a reader could follow.
     std::vector<std::vector<Candidate>> local;
-    for (const auto &m : mentioned) local.push_back(in_file(m));
+    for (const auto &m : mentioned)
+      if (!skipped(m)) local.push_back(in_file(m));
     std::optional<std::vector<Candidate>> root;
     for (bool strict : parent.empty() ? std::vector<bool>{false} : std::vector<bool>{true, false}) {
       for (const auto &found : local)
@@ -969,7 +972,7 @@ static void set_leaving(bool leaving) {
 // plan or post fake feedback:
 //   GET  <base>                the browser viewer
 //   GET  <base>session         {key, name, title, text, root, round}
-//   GET  <base>mermaid.min.js  for a viewer whose plan has diagrams
+//   GET  <base>pele.min.js     for a viewer whose plan has diagrams
 //   POST <base>feedback        {verdict: approve | changes | end, leaving?, general,
 //                               comments: [{note, anchor: {kind, ...}}]}
 //   POST <base>resolve         {keys: [{file?, name?, line?, end?}], files} → [found?]
@@ -1002,13 +1005,14 @@ static void serve(int fd, std::string base, std::string page, std::string sessio
     return;
   }
 
-  // Mermaid is too big to build into every page; a viewer with diagrams asks for it.
-  if (method == "GET" && path == base + "mermaid.min.js") {
+  // Only a plan with diagrams needs the renderer, so a viewer asks for it rather than
+  // every page carrying it.
+  if (method == "GET" && path == base + "pele.min.js") {
     std::string js;
-    if (read_file(g_assets + "/mermaid.min.js", js))
+    if (read_file(g_assets + "/pele.min.js", js))
       reply(fd, "200 OK", "text/javascript; charset=utf-8", js);
     else
-      reply(fd, "404 Not Found", "text/plain; charset=utf-8", "mermaid.min.js not found");
+      reply(fd, "404 Not Found", "text/plain; charset=utf-8", "pele.min.js not found");
     ::close(fd);
     return;
   }
