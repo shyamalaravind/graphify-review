@@ -18,19 +18,24 @@
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px;
-  max-width: 1200px; margin: 0 auto; padding: 32px 16px; }
+  max-width: 1600px; margin: 0 auto; padding: 32px 16px; }
 @media (max-width: 860px) {
   main { grid-template-columns: minmax(0, 1fr); }
   aside { position: static; max-height: none; }
 }
 header { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
-#plan { max-width: 760px; overflow-wrap: anywhere; }
+/* Prose keeps a readable line length; a table can use the whole column (below). */
+#plan { overflow-wrap: anywhere; }
+#plan > :not(table) { max-width: 760px; }
 #plan a { color: var(--accent); }
 #plan pre, #plan code { background: var(--code); border-radius: 4px; font-size: 14px; }
 #plan pre { padding: 12px; overflow-x: auto; }
 #plan code { padding: 1px 4px; }
 #plan pre code { padding: 0; }
-#plan table { border-collapse: collapse; }
+/* A table takes its natural width up to the whole column, wrapping by word past that; it
+   scrolls sideways only when even its longest words don't fit. */
+#plan table { border-collapse: collapse; display: block; width: max-content; max-width: 100%; overflow-x: auto;
+  overflow-wrap: normal; }
 #plan th, #plan td { border: 1px solid var(--line); padding: 4px 8px; }
 ::highlight(review) { background: var(--mark); }
 aside { position: sticky; top: 16px; align-self: start; max-height: calc(100vh - 32px);

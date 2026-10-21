@@ -46,7 +46,9 @@ body { margin: 0; overflow: hidden; background: var(--bg); color: var(--fg);
 .frame pre { padding: 12px; overflow-x: auto; }
 .frame code { padding: 1px 4px; }
 .frame pre code { padding: 0; }
-.frame table { border-collapse: collapse; font-size: 14px; }
+/* A table takes its natural width, up to 1400px and wrapping by word past that: it widens
+   its frame past the prose column instead of squeezing into it. */
+.frame table { border-collapse: collapse; font-size: 14px; width: max-content; max-width: 1400px; overflow-wrap: normal; }
 .frame th, .frame td { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
 .name.live { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .diagram .name.live { fill: var(--accent); text-decoration: underline; }  /* SVG text takes a fill, not a colour */
@@ -235,7 +237,8 @@ function frames(staging) {
   frame(null, 'intro');
   for (const el of [...staging.children]) {
     if (el.localName === 'h2') { frame(el, ''); continue; }
-    if (el.classList.contains('diagram')) { body.append(el); continue; }
+    // A diagram or a table sits in the frame itself, not the prose column, so it takes its own width.
+    if (el.classList.contains('diagram') || el.localName === 'table') { body.append(el); continue; }
     let prose = body.lastElementChild;
     if (!prose?.classList.contains('prose')) body.append(prose = Object.assign(document.createElement('div'), { className: 'prose' }));
     prose.append(el);
