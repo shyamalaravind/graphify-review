@@ -31,9 +31,9 @@ The files:
 The broker no longer opens VS Code, and `PLAN_REVIEW_VIEWER` is gone. The viewer last worked at commit `b04dc5e`, so run that commit from a worktree of its own, which leaves your linked skills on the current code:
 
 ```sh
-git worktree add ../plan-review-vscode b04dc5e
-../plan-review-vscode/vscode/install.sh
-PLAN_REVIEW_VIEWER=vscode ../plan-review-vscode/skill/graphify-review/review plan.md
+git worktree add ../graphify-review-vscode b04dc5e
+../graphify-review-vscode/vscode/install.sh
+PLAN_REVIEW_VIEWER=vscode ../graphify-review-vscode/skill/graphify-review/review plan.md
 ```
 
 To bring it forward instead, restore `open_vscode()` and `PLAN_REVIEW_VIEWER` in `skill/graphify-review/review.cpp` from that commit. The session files and the page's `window.planHost` hook are still there.

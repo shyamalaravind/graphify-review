@@ -1,25 +1,17 @@
-# plan-review
+# graphify-review
 
-Review coding-agent plans with inline comments, in two ways. Each is an [Agent Skill](https://agentskills.io), so it works in Claude Code, Codex, Gemini CLI, Cursor and any other tool that reads `SKILL.md`.
+Review a coding agent's plan as a canvas of diagrams in your browser, with every function it names one hover or click away from the code. It's an [Agent Skill](https://agentskills.io), so it works in Claude Code, Codex, Gemini CLI, Cursor and any other tool that reads `SKILL.md`.
 
-- **plan-review**: the classic review. The plan opens as a document in your browser; you comment on its text. It also runs on its own before an agent leaves plan mode.
-- **graphify-review**: the plan as a canvas of diagrams in your browser, with every function it names one hover or click away from the code. It runs when you ask for it.
-
-In both, select text → **Comment**. Add an optional general comment, then **Approve** or **Request changes**.
+Select text, or double-click a box → **Comment**. Add an optional general comment, then **Approve** or **Request changes**.
 The agent receives each comment with what it's about, and revises the plan.
 
 Don't want to say anything? **End review without feedback** — or just close the review — ends it. The agent is told the review stopped with no instructions, and waits for you instead of guessing.
 
 Everything runs locally and offline, from `127.0.0.1`, with the renderers bundled.
 
-## plan-review
+It runs when you ask for it by name. For the plan as a document you comment on, and the review that runs on its own before an agent leaves plan mode, see its sibling, [plan-review](https://github.com/shyamalaravind/plan-review). When you ask for a graphify review in plan mode, it takes plan-review's place, so the plan isn't reviewed twice.
 
-Ask for a plan review (`/plan-review`, or `/plan-review path/to/file.md`), and the plan opens in a local page.
-The page is served in a single response, with the plan and the markdown renderer built into the HTML, so there are no network requests.
-
-To use a browser other than your default, set `PLAN_REVIEW_BROWSER` (see [Install](#install)).
-
-## graphify-review
+## How it works
 
 Ask for it by name (`/graphify-review`, or `/graphify-review path/to/file.md`). The agent writes the plan in the [plan format](skill/graphify-review/FORMAT.md) first, and the plan opens as a canvas in your browser. A revised plan comes back as the next round of the same review, in a new tab.
 
@@ -41,7 +33,7 @@ flowchart LR
 
 The plan is one canvas filling the window, not a document. The intro is a card, each `##` section a frame, and each flowchart box carries its description entry inside it, so the diagram is the explanation. Drag empty space or scroll to move around; ⌘-scroll or pinch to zoom; **Fit** shows everything. Comments sit in a panel on the right: select text, or double-click a box, to comment on it.
 
-It opens in your default browser, or the one `PLAN_REVIEW_BROWSER` names, like plan-review. No language server starts: a review costs the broker (a few MB) and one tab.
+It opens in your default browser, or the one `PLAN_REVIEW_BROWSER` names. No language server starts: a review costs the broker (a few MB) and one tab.
 
 - Every name in the plan that is defined in the code becomes a link. The broker finds it by text: the file the plan names, else the files it mentions, else one pass over the repository's files (git's, or a walk that skips dependency and build folders) that checks only the lines mentioning the name for the shapes definitions take in most languages: `function x`, `class X`, `def x`, `x(…) {`, `public x: T`. On a 7,000-file Angular repository it found the same 41 of a plan's 45 names as VS Code's language servers, in 0.3 seconds.
 - Hover a name for the lines of its definition (no types: there is no language server); click it to open it in your editor at that line. `PLAN_REVIEW_EDITOR` is the command that opens `path:line` (`zed`, `code -g`, `subl`); unset, it is Zed if `zed` is on your `PATH`, else VS Code, else the file's default app.
@@ -53,35 +45,33 @@ graphify-review used to open in VS Code as well, where the language servers foun
 
 ## Install
 
-Clone the repo, then link both skills into your tool's skills directory:
+Clone the repo, then link the skill into your tool's skills directory:
 
 ```sh
-git clone https://github.com/shyamalaravind/plan-review.git
-for s in plan-review graphify-review; do
-  ln -s "$PWD/plan-review/skill/$s" ~/.claude/skills/$s   # Claude Code
-  ln -s "$PWD/plan-review/skill/$s" ~/.codex/skills/$s    # Codex (Cursor reads this too)
-  ln -s "$PWD/plan-review/skill/$s" ~/.gemini/skills/$s   # Gemini CLI
-done
+git clone https://github.com/shyamalaravind/graphify-review.git
+ln -s "$PWD/graphify-review/skill/graphify-review" ~/.claude/skills/graphify-review   # Claude Code
+ln -s "$PWD/graphify-review/skill/graphify-review" ~/.codex/skills/graphify-review    # Codex (Cursor reads this too)
+ln -s "$PWD/graphify-review/skill/graphify-review" ~/.gemini/skills/graphify-review   # Gemini CLI
 ```
 
 Create the skills directory first if it doesn't exist. Requires a C++17 compiler — `clang++` from the Xcode command line tools on macOS (`xcode-select --install`), or `g++` on Linux. No packages, no runtime.
 
-Each skill builds its own binary on its first review (~1s); after that it starts in a few milliseconds. To build them ahead of time: `make -C skill/plan-review && make -C skill/graphify-review`.
+The skill builds its binary on its first review (~1s); after that it starts in a few milliseconds. To build it ahead of time: `make -C skill/graphify-review`.
 
 To pick the browser reviews open in and the editor a clicked name opens in:
 
 ```sh
-export PLAN_REVIEW_BROWSER="Brave Browser"   # both skills; macOS. brave-browser on Linux
-export PLAN_REVIEW_EDITOR=zed                # graphify-review: opens path:line
+export PLAN_REVIEW_BROWSER="Brave Browser"   # macOS; brave-browser on Linux. plan-review reads it too
+export PLAN_REVIEW_EDITOR=zed                # opens path:line
 ```
 
 Put these in `~/.zshenv` (or your shell's equivalent), not `~/.zshrc`. Agents run commands in non-interactive shells, and those skip `~/.zshrc`.
 
-You can also run either without an agent: `skill/plan-review/review plan.md` (or `skill/graphify-review/review plan.md`) prints the feedback to stdout. `--title` names the review (`review resume.md --title "Apollo.io Resume Senior Software Engineer"`), so another skill that hands its document over can ask for a title. graphify-review also takes `--root <dir>`, the code the plan is about; without it, it's the git repository `review` runs in.
+You can also run it without an agent: `skill/graphify-review/review plan.md` prints the feedback to stdout. `--title` names the review (`review resume.md --title "Apollo.io Resume Senior Software Engineer"`), so another skill that hands its document over can ask for a title. `--root <dir>` is the code the plan is about; without it, it's the git repository `review` runs in.
 
 ## Session protocol
 
-graphify-review's, for writing another viewer. A round's broker announces itself in `$XDG_STATE_HOME/plan-review/sessions/<key>.json` (default `~/.local/state/…`), where the key is the plan's file name without `.md`:
+For writing another viewer. A round's broker announces itself in `$XDG_STATE_HOME/plan-review/sessions/<key>.json` (default `~/.local/state/…`; the folder keeps the name it had when this skill lived in the plan-review repository), where the key is the plan's file name without `.md`:
 
 ```json
 {"key": "migrate-auth", "name": "migrate-auth.md", "title": "", "url": "http://127.0.0.1:52144/<token>/",
@@ -106,21 +96,15 @@ The broker answers only requests addressed to `127.0.0.1:<port>` (the `Host` hea
 
 ## Layout
 
-The two skills share no files, so each can be linked on its own.
-
-- `ARCHITECTURE.md`: how both skills work, written in the plan format. Open it as a canvas with `skill/graphify-review/review ARCHITECTURE.md`.
-- `skill/plan-review/`: the classic review.
-  - `SKILL.md`: instructions the agent follows.
-  - `review`: launcher. Compiles the server on first use (or after `review.cpp` changes) into `bin/review`, then runs it.
-  - `review.cpp`: the server — C++17, standard library and POSIX sockets only. It serves the page, blocks until you submit or end the review, and prints the feedback.
-  - `page.html`: the review page.
-  - `marked.min.js`: a bundled copy of [marked](https://github.com/markedjs/marked) v12.0.2 (MIT) that renders the markdown.
-- `skill/graphify-review/`: the canvas review.
+- `ARCHITECTURE.md`: how it works, written in the plan format. Open it as a canvas with `skill/graphify-review/review ARCHITECTURE.md`.
+- `skill/graphify-review/`: the skill.
   - `SKILL.md`: instructions the agent follows.
   - `FORMAT.md`: the plan format.
-  - `review`: the same launcher.
+  - `review`: launcher. Compiles the broker on first use (or after `review.cpp` changes) into `bin/review`, then runs it.
   - `review.cpp`: the broker — C++17, standard library and POSIX sockets only.
   - `page.html`: the canvas page.
-  - `marked.min.js`: marked v12.0.2, as above.
+  - `marked.min.js`: a bundled copy of [marked](https://github.com/markedjs/marked) v12.0.2 (MIT) that renders the markdown.
   - `pele.min.js`: a bundled copy of [Pele](https://github.com/obsidianmd/pele) v1.6.0 (MIT), its `dist/pele.global.js`, that draws the diagrams. It reads Mermaid's syntax, so plans still use ```` ```mermaid ```` blocks.
-- `archive/vscode/`: graphify-review's VS Code viewer, archived. Its README says how it worked and how to run it again.
+- `archive/vscode/`: the VS Code viewer, archived. Its README says how it worked and how to run it again.
+
+The history before this repository is plan-review's: graphify-review was split out of it, and its commits are kept here.

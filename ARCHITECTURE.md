@@ -1,16 +1,14 @@
-# How plan-review and graphify-review work
+# How graphify-review works
 
-Two Agent Skills in this repository. Each is a folder an agent reads (its SKILL.md) plus
-a small C++ program the agent runs, and they share no files, so each can be linked into
-an agent's skills folder on its own: the agent's skills folder links to this repo's
-`skill/` folders.
+An Agent Skill: a folder an agent reads (its SKILL.md) plus a small C++ program the agent
+runs. The agent's skills folder links to this repo's `skill/graphify-review/` folder. It
+shows a plan as a canvas of diagrams, like this one, where every function it names is a
+hover or a click away from the code, and it runs only when asked for by name.
 
-- **plan-review**: the classic review. The plan opens as a document in the browser, and
-  you comment on its text. It runs on `/plan-review`, and on its own before an agent
-  leaves plan mode.
-- **graphify-review**: the plan as a canvas of diagrams, like this one, where every
-  function it names is a hover or a click away from the code. It runs only when asked
-  for by name.
+Its sibling, plan-review, lives in a repository of its own: the classic review, where
+the plan opens as a document and you comment on its text. It runs on `/plan-review`,
+and on its own before an agent leaves plan mode. graphify-review's broker began as
+plan-review's, before sessions, viewers and names.
 
 graphify-review has three parts, and most of this canvas is about them:
 
@@ -23,8 +21,6 @@ graphify-review has three parts, and most of this canvas is about them:
 3. **The plan format**, `skill/graphify-review/FORMAT.md`: how the agent writes a plan so
    the page can draw it and link its names.
 
-The classic skill, `skill/plan-review/review.cpp`, is the first part alone (frame 7).
-
 To see this file as a canvas, run `skill/graphify-review/review ARCHITECTURE.md` from the
 repository root. When the architecture changes, change this file.
 
@@ -33,23 +29,21 @@ repository root. When the architecture changes, change this file.
 ```mermaid
 flowchart LR
   ASK["you ask for a review<br/>or the agent is about to leave plan mode"]
-  PRS["skill/plan-review/SKILL.md:11-36"]
+  PRS["plan-review<br/>its own repository"]
   GRS["skill/graphify-review/SKILL.md:13-35"]
   FMT["skill/graphify-review/FORMAT.md:10-48"]
-  PB["the classic broker<br/>frame 7"]
   GB["the graphify broker<br/>frames 2 to 4"]
   ASK -->|"by default"| PRS
   ASK -->|"asked for by name"| GRS
   PRS -.->|"hands plan mode over<br/>when graphify was asked for"| GRS
   GRS -->|"has the agent write the plan as"| FMT
-  PRS -->|"runs review"| PB
   FMT -->|"then runs review"| GB
 ```
 
-- **`skill/plan-review/SKILL.md`** (lines 11-36): runs before the host's plan-approval
-  gate (`exit_plan_mode` in Claude Code), as a human checkpoint in front of it, not a
-  replacement. If you asked for a graphify review, it steps aside so the plan isn't
-  reviewed twice.
+- **plan-review**, in its own repository: its SKILL.md runs before the host's
+  plan-approval gate (`exit_plan_mode` in Claude Code), as a human checkpoint in front of
+  it, not a replacement. If you asked for a graphify review, it steps aside so the plan
+  isn't reviewed twice. graphify-review's step 0 takes that checkpoint instead.
 - **`skill/graphify-review/SKILL.md`** (lines 13-35): names the plan file for the session
   (2-5 kebab-case words, never plan.md), runs the review in the background, and acts on
   the one line that comes back.
@@ -200,7 +194,7 @@ flowchart TD
 - **`frames()`** (`graphify-review/page.html`): the text before the first heading is the
   intro card, and each section a frame.
 - **`drawDiagrams()`** (`graphify-review/page.html`): Pele (`pele.min.js`) draws each
-  block as SVG, all nine here in under 10 ms, in the page's colours through its
+  block as SVG, all of them here in under 10 ms, in the page's colours through its
   `--pele-*` variables, so a change to dark mode needs no redraw.
 - **`shapeCards()`** (`graphify-review/page.html`): Pele centres every line, so a box with
   a description gets its title over a rule and its lines left-aligned under it.
@@ -267,34 +261,14 @@ flowchart TD
   `PLAN_REVIEW_EDITOR` with path:line (here, `zed`); unset, Zed, else VS Code, else the
   file's default app.
 
-## 7. The classic plan-review
-
-```mermaid
-flowchart LR
-  PM["the classic broker<br/>plan-review/review.cpp: main()"]
-  PG["one browser tab<br/>skill/plan-review/page.html"]
-  PS["the answer<br/>plan-review/review.cpp: serve()"]
-  PR["the text for the agent<br/>plan-review/review.cpp: render()"]
-  PM -->|"plan and marked built into the page"| PG
-  PG -->|"POST submit"| PS
-  PS --> PR
-```
-
-graphify-review's broker began as this one, before sessions, viewers and names:
-
-- One page in one response: the plan and the markdown renderer are pasted into the HTML,
-  so the tab makes no other request.
-- One way back, `POST submit`, with the same verdicts and the same text for the agent.
-- No session files, rounds or code lookup: about 600 lines against 1,300.
-
-## 8. Why it's built this way
+## 7. Why it's built this way
 
 - RAM is the measure. A browser review costs the broker (1.5 to 7 MB in testing) and one
   tab; VS Code's language servers took about 2.8 GB on a large Angular repository even in
   the lean review instance, and about 7 GB in a VS Code with a full set of extensions.
-- Pele, not Mermaid, draws the diagrams. On this canvas it draws all nine in under 10 ms,
-  where Mermaid took 110 to 150, from 680 KB of JavaScript against 3.5 MB, and the tab's
-  JavaScript heap is 4.3 MB against 8.1 MB.
+- Pele, not Mermaid, draws the diagrams. On this canvas, when it had nine, it drew them
+  all in under 10 ms, where Mermaid took 110 to 150, from 680 KB of JavaScript against
+  3.5 MB, and the tab's JavaScript heap was 4.3 MB against 8.1 MB.
 - Nothing to install but a C++17 compiler: the standard library and POSIX sockets, marked
   and Pele bundled, everything offline on 127.0.0.1.
 - Any agent that reads SKILL.md can use it (Claude Code, Codex, Gemini CLI, Cursor),
@@ -305,7 +279,7 @@ graphify-review's broker began as this one, before sessions, viewers and names:
 - Zed can't host the canvas, since its extensions add no UI, so it gets the clicks
   instead: a name opens there at its line.
 
-## 9. Now and before: the browser and the VS Code viewer
+## 8. Now and before: the browser and the VS Code viewer
 
 The same broker, page and plan format. What changed is who answers the page's questions
 about the code, and where a click goes.
