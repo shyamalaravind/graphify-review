@@ -31,7 +31,7 @@ body { margin: 0; overflow: hidden; background: var(--bg); color: var(--fg);
   background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 24px 24px; }
 #canvas.panning, body.space #canvas { cursor: grabbing; }
 #canvas.panning * { user-select: none; }
-#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; display: flex; flex-wrap: wrap;
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; display: flex; flex-direction: column;
   align-items: flex-start; gap: 72px; padding: 72px; }
 .frame { flex: 0 0 auto; background: color-mix(in srgb, var(--bg) 88%, transparent); border: 1px solid var(--line);
   border-radius: 14px; padding: 20px 24px 24px; }
@@ -60,7 +60,7 @@ body { margin: 0; overflow: hidden; background: var(--bg); color: var(--fg);
   --pele-accent: var(--accent); --pele-radius: 6px; }
 .diagram svg { display: block; }
 .diagram.pending { white-space: pre-wrap; color: var(--muted); font: 13px/1.5 var(--mono); max-width: 600px; }
-.diagram.broken p { margin: 4px 0 0; color: var(--accent); font-size: 13px; }
+.diagram.broken p { margin: 4px 0 0; color: var(--accent); font: 13px/1.5 var(--mono); white-space: pre-wrap; }
 .diagram .rule { stroke: var(--line); }
 .diagram .pele-node { cursor: default; }
 
@@ -158,6 +158,7 @@ marked.use({ renderer: { html: esc } });
 //   open(key)     → show the definition (or file and line) in the editor
 //   onRevised(fn) → fn(session) when the plan's next round arrives
 //   shown(stats)  → told once the plan is drawn and its names first resolved
+//   drawn(report) → told {broken: [{diagram, error}]} when diagrams didn't draw, numbered from 1
 // and it calls window.planPage.comment(anchor) to add a comment on code from the editor.
 // The broker that served a browser tab looks names up in the code's text itself.
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -171,6 +172,7 @@ const host = window.planHost || {
   resolve: (keys, files) => post('resolve', { keys, files }),
   hover: key => post('hover', key),
   open: key => post('open', key),
+  drawn: report => post('drawn', report).catch(() => {}),
 };
 const navigable = typeof host.resolve === 'function';
 
@@ -212,11 +214,14 @@ async function show(session) {
     return { el: div, source: code.textContent, literals: new Map(), cards: new Set() };
   });
   findNames(staging);
-  describeNodes(staging);
+  describeNodes();
   world.replaceChildren(...frames(staging));
   $('#done').hidden = true;
   $('#app').hidden = false;
   await drawDiagrams();
+  // The agent hears which diagrams the reader got as source, with the verdict.
+  const broken = diagrams.flatMap((d, i) => d.drawn ? [] : [{ diagram: i + 1, error: d.error }]);
+  if (broken.length) host.drawn?.({ broken });
   for (const d of diagrams) if (d.drawn) { findNames(d.el); wrapLiterals(d); shapeCards(d); }
   arrange();
   resolveNames();
@@ -253,14 +258,15 @@ function frames(staging) {
 // A file needs a source extension, so `store.select` stays a name while `page.html` is a file.
 const FILE = String.raw`[\w@.\-/]*\w\.(?:[cm]?[jt]sx?|json|html?|s?css|less|md|mdx|vue|svelte|py|rb|go|rs|java|kt|swift|cs|c|cc|cpp|h|hpp|m|mm|php|sh|zsh|bash|toml|ya?ml|xml|sql|ini|conf|txt|lock|gradle|proto|graphql)\b`;
 const IDENT = String.raw`[A-Za-z_$][\w$]*(?:(?:::|\.|#)[A-Za-z_$][\w$]*)*`;
-const IN_TEXT = new RegExp(String.raw`(${FILE}):\s*(${IDENT})(?:\(\))?|(${FILE}):(\d+)(?:-(\d+))?|\b(${IDENT})\(\)`, 'g');
+// A bare file counts too, so `review.cpp` in a diagram's box or message links like it does in a code span.
+const IN_TEXT = new RegExp(String.raw`(${FILE}):\s*(${IDENT})(?:\(\))?|(${FILE}):(\d+)(?:-(\d+))?|\b(${IDENT})\(\)|(${FILE})`, 'g');
 const WHOLE_CODE = new RegExp(String.raw`^(?:(${FILE}):\s*)?(${IDENT})(\(\))?$`);
 const WHOLE_FILE = new RegExp(String.raw`^(${FILE})(?::(\d+)(?:-(\d+))?)?$`);
 
 function keyOf(m) {
   if (m[1]) return { file: m[1], name: m[2] };
   if (m[3]) return { file: m[3], line: +m[4], end: +(m[5] || m[4]) };
-  return { name: m[6] };
+  return m[6] ? { name: m[6] } : { file: m[7] };
 }
 function codeKey(text) {
   const f = WHOLE_FILE.exec(text.trim());
@@ -280,7 +286,9 @@ function nameSpan(label, key, svg = false) {
   span.dataset.key = id;
   return span;
 }
-const keyName = key => key.name || key.file;
+// What a card and its box are matched by: the name, else the file and its lines, so two
+// boxes for different lines of one file are different boxes.
+const keyName = key => key.name || (key.line ? key.file + ':' + key.line + '-' + key.end : key.file);
 
 function findNames(el) {
   const html = document.body.namespaceURI, walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
@@ -308,6 +316,8 @@ function findNames(el) {
 
 // ---- Descriptions on the diagram. A list item that starts with a box's name is that box's
 // description: it moves into the box, which Pele then sizes to hold it, and leaves the text.
+// A diagram's descriptions are the list items between it and the next diagram or heading,
+// so the plan's other bullets, and other diagrams' descriptions, never land in its boxes.
 const SHAPE = /\b([A-Za-z_][\w-]*)(\[\[|\[\(|\(\[|\(\(|\{\{|\[|\(|\{)"([^"]*)"(\]\]|\)\]|\]\)|\)\)|\}\}|\]|\)|\})/g;
 const mermaidText = s => s.replace(/#/g, '#35;').replace(/"/g, '#quot;').replace(/</g, '#lt;')
   .replace(/>/g, '#gt;').replace(/`/g, "'");
@@ -330,23 +340,34 @@ function entryText(li, skip) {
     }
   };
   walk(li, 1);
-  // "(path:12-20): what changes" reads better with the path on its own line.
-  return out.join('').trim().replace(/^\(([^)]+)\)\s*:\s*/, '$1\n').replace(/\*\*\*\*/g, '').replace(/ *\n */g, '\n');
+  // "(path:12-20): what changes" reads better with the path on its own line, and the colon
+  // after a name the box already shows ("**`serve()`**: answers …") goes with the name.
+  return out.join('').trim().replace(/^\(([^)]+)\)\s*:\s*/, '$1\n').replace(/^[:–—-]\s*/, '')
+    .replace(/\*\*\*\*/g, '').replace(/ *\n */g, '\n');
 }
 
-function describeNodes(staging) {
+function entriesAfter(d) {
   const entries = new Map();
-  for (const li of staging.querySelectorAll('li')) {
-    if (li.closest('.diagram')) continue;
-    const first = li.querySelector('.name');
-    if (first && li.textContent.trim().startsWith(first.textContent.trim())) {
-      const k = keyName(names.get(first.dataset.key));
-      if (!entries.has(k)) entries.set(k, li);
+  for (let el = d.el.nextElementSibling; el && !/^h[1-6]$/.test(el.localName) && !el.classList.contains('diagram');
+    el = el.nextElementSibling) {
+    if (el.localName !== 'ul' && el.localName !== 'ol') continue;
+    for (const li of el.children) {
+      const first = li.querySelector('.name');
+      if (first && li.textContent.trim().startsWith(first.textContent.trim())) {
+        const k = keyName(names.get(first.dataset.key));
+        if (!entries.has(k)) entries.set(k, li);
+      }
     }
   }
+  return entries;
+}
+
+function describeNodes() {
   const used = new Set();
   for (const d of diagrams) {
     if (!/^\s*(flowchart|graph)\b/.test(d.source)) continue;
+    const entries = entriesAfter(d);
+    if (!entries.size) continue;
     const seen = new Set();
     d.source = d.source.replace(SHAPE, (whole, id, open, label, close) => {
       if (seen.has(id)) return whole;
@@ -499,10 +520,13 @@ const loadPele = () => peleReady ??= new Promise((ok, fail) => document.head.app
   document.createElement('script'), { src: host.asset('pele.min.js'), onload: ok, onerror: fail })));
 async function drawDiagrams() {
   if (!diagrams.length) return;
+  // The whole error is kept for the agent; the reader sees where the parser stopped.
   const failed = (d, why) => {
+    d.error = why;
     d.el.className = 'diagram broken';
     d.el.replaceChildren(Object.assign(document.createElement('pre'), { textContent: d.source }),
-      Object.assign(document.createElement('p'), { textContent: 'This diagram didn’t draw: ' + why }));
+      Object.assign(document.createElement('p'), { textContent: 'This diagram didn’t draw: '
+        + why.split('\n').filter(l => l.trim()).slice(0, 4).join('\n') }));
   };
   try { await loadPele(); } catch {
     diagrams.forEach(d => failed(d, 'the diagram renderer could not be loaded.'));
@@ -518,7 +542,7 @@ async function drawDiagrams() {
       d.el.className = 'diagram';
       d.drawn = true;
     } catch (e) {
-      failed(d, (e.line ? 'line ' + e.line + ': ' : '') + String(e.message || e).split('\n')[0]);
+      failed(d, (e.line ? 'line ' + e.line + ': ' : '') + String(e.message || e));
     }
   }
 }
@@ -554,14 +578,13 @@ function focusOn(el) {
   view.y += h / 2 - (r.top + r.height / 2);
   apply();
 }
-// The frames wrap like words in a paragraph, as wide as the widest of them or the window.
+// The frames stand in one column, in the plan's order, so scrolling down reads it. It opens
+// at the top, at the zoom where the widest frame fits beside the panel, but not below 60%,
+// where text stops being readable: a wider frame is panned to instead.
 function arrange() {
-  world.style.width = '';
-  const frames = [...world.children];
-  const widest = Math.max(...frames.map(f => f.offsetWidth), 0);
-  world.style.width = Math.max(visible().w * 1.4, widest + 144) + 'px';
-  const fitK = Math.min(1, (visible().w - 48) / world.offsetWidth);
-  Object.assign(view, { k: Math.max(0.6, fitK), x: 0, y: 24 });
+  const { w } = visible();
+  const k = Math.min(1, Math.max(0.6, (w - 24) / world.offsetWidth));
+  Object.assign(view, { k, x: Math.max(0, (w - world.offsetWidth * k) / 2), y: 24 });
   apply();
 }
 

@@ -13,7 +13,7 @@ It runs when you ask for it by name. For the plan as a document you comment on, 
 
 ## How it works
 
-Ask for it by name (`/graphify-review`, or `/graphify-review path/to/file.md`). The agent writes the plan in the [plan format](skill/graphify-review/FORMAT.md) first, and the plan opens as a canvas in your browser. A revised plan comes back as the next round of the same review, in a new tab.
+Ask for it by name (`/graphify-review`, or `/graphify-review path/to/file.md`). The agent writes the plan in the [canvas format](skill/graphify-review/FORMAT.md) first, and the plan opens as a canvas in your browser. A revised plan comes back as the next round of the same review, in a new tab.
 
 ### Three parts
 
@@ -27,11 +27,11 @@ flowchart LR
 
 - **The channel.** `review` is the broker: it holds one round of a plan's review, announces it, opens it in your browser, and prints the feedback when it comes back. Agents only ever run this command.
 - **The viewer.** One page, [`page.html`](skill/graphify-review/page.html), in a browser tab. It asks the broker which of the plan's names are in the code, and the broker answers from the code's text. Anything else that speaks the [session protocol](#session-protocol) can be a viewer too.
-- **The plan format.** [`FORMAT.md`](skill/graphify-review/FORMAT.md): a code-flow flowchart, a description entry per changed node, and names written as `file: name()` or `path/file.ts:42-60`. The skill has the agent write plans this way.
+- **The canvas format.** [`FORMAT.md`](skill/graphify-review/FORMAT.md): an intro with an overview diagram and the reading order, one numbered frame per idea, the kind of diagram that fits the logic (failure paths included), cards inside code boxes, and names written as `file: name()` or `path/file.ts:42-60`. The skill has the agent write plans and explanations this way.
 
 ### The canvas
 
-The plan is one canvas filling the window, not a document. The intro is a card, each `##` section a frame, and each flowchart box carries its description entry inside it, so the diagram is the explanation. Drag empty space or scroll to move around; ⌘-scroll or pinch to zoom; **Fit** shows everything. Comments sit in a panel on the right: select text, or double-click a box, to comment on it.
+The plan is one canvas filling the window, not a document. The intro is a card, each `##` section a frame below it in one column, and each flowchart box carries its description entry (the list item under the diagram that starts with the box's name) inside it, so the diagram is the explanation. A diagram that doesn't draw shows its source, and the agent is told with the verdict. Drag empty space or scroll to move around; ⌘-scroll or pinch to zoom; **Fit** shows everything. Comments sit in a panel on the right: select text, or double-click a box, to comment on it.
 
 It opens in your default browser, or the one `PLAN_REVIEW_BROWSER` names. No language server starts: a review costs the broker (a few MB) and one tab.
 
@@ -89,6 +89,7 @@ The file goes when the round ends, and `<key>.round` beside it then holds the ro
 | `POST <url>resolve` | `{keys, files}` → which of the names exist in the code, as `[true, false, …]`; a key is `{file?, name?, line?, end?}`, and `files` are the ones the plan mentions, searched first |
 | `POST <url>hover` | a key → `{markdown, where}`: the lines of its definition, and `path:line` |
 | `POST <url>open` | a key → opens it in `PLAN_REVIEW_EDITOR` |
+| `POST <url>drawn` | `{broken: [{diagram, error}]}`, the diagrams the viewer couldn't draw (numbered from 1), which the agent is told with the verdict |
 
 A comment's `anchor` says what it's about: `{kind: "quote", quote}` for prose, `{kind: "diagram", diagram, node?, quote}` for a diagram (numbered from 1) and the node in it, `{kind: "code", file, start, end, quote}` for lines of code. `{verdict: "end", leaving: true}` means the viewer went away: the broker waits two seconds for it to come back (a reload) before ending the review.
 
@@ -96,10 +97,10 @@ The broker answers only requests addressed to `127.0.0.1:<port>` (the `Host` hea
 
 ## Layout
 
-- `ARCHITECTURE.md`: how it works, written in the plan format. Open it as a canvas with `skill/graphify-review/review ARCHITECTURE.md`.
+- `ARCHITECTURE.md`: how it works, written in the canvas format. Open it as a canvas with `skill/graphify-review/review ARCHITECTURE.md`.
 - `skill/graphify-review/`: the skill.
   - `SKILL.md`: instructions the agent follows.
-  - `FORMAT.md`: the plan format.
+  - `FORMAT.md`: the canvas format.
   - `review`: launcher. Compiles the broker on first use (or after `review.cpp` changes) into `bin/review`, then runs it.
   - `review.cpp`: the broker — C++17, standard library and POSIX sockets only.
   - `page.html`: the canvas page.

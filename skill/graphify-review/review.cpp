@@ -382,6 +382,25 @@ static std::string render(const std::string &name, const JVal &r) {
   return out.str();
 }
 
+// The diagrams the viewer couldn't draw, which the user saw as source: told to the agent
+// whatever the verdict, since it wrote them and the user can't fix them.
+static std::string not_drawn(const JVal &broken) {
+  if (broken.type != JVal::Arr || broken.arr.empty()) return "";
+  std::ostringstream out;
+  out << "\n\nDiagrams that didn't draw (the user saw their source instead):";
+  for (const JVal &b : broken.arr) {
+    if (b.type != JVal::Obj) continue;
+    out << "\n- Diagram " << number_of(b, "diagram") << ":";
+    int shown = 0;
+    for (const std::string &line : lines_of(b.text("error"))) {
+      if (trim(line).empty()) continue;
+      if (++shown > 8) break;  // the parser's message, its excerpt and its caret
+      out << (shown == 1 ? " " : "\n  ") << line;
+    }
+  }
+  return out.str();
+}
+
 // ---------------------------------------------------------------- shell
 
 static std::string shell_quote(const std::string &s) {
@@ -920,6 +939,7 @@ static JVal g_result;
 // reload — which fetches the page or the session again and clears it — doesn't end it.
 static bool g_leaving = false;
 static const auto kLeaveGrace = std::chrono::milliseconds(2000);
+static JVal g_broken;  // the diagrams the viewer last said it couldn't draw
 static std::string g_assets;  // page.html and the scripts it loads
 
 static void send_all(int fd, const std::string &data) {
@@ -1001,6 +1021,7 @@ static void set_leaving(bool leaving) {
 //   POST <base>resolve         {keys: [{file?, name?, line?, end?}], files} → [found?]
 //   POST <base>hover           a key → {markdown, where}
 //   POST <base>open            a key → opens it in the editor
+//   POST <base>drawn           {broken: [{diagram, error}]}, the diagrams it couldn't draw
 static void serve(int fd, std::string base, std::string page, std::string session) {
   std::string buf;
   size_t head_end;
@@ -1111,6 +1132,17 @@ static void serve(int fd, std::string base, std::string page, std::string sessio
       open_in_editor(*place);
       reply(fd, "200 OK", "application/json", "{}");
     }
+    ::close(fd);
+    return;
+  }
+
+  if (method == "POST" && path == base + "drawn") {
+    const JVal *broken = parsed.get("broken");
+    {
+      std::lock_guard<std::mutex> lock(g_mutex);
+      g_broken = broken && broken->type == JVal::Arr ? *broken : JVal();
+    }
+    reply(fd, "200 OK", "application/json", "{}");
     ::close(fd);
     return;
   }
@@ -1319,7 +1351,7 @@ int main(int argc, char **argv) {
       g_done = true;
     }
   }
-  JVal result = g_result;
+  JVal result = g_result, broken = g_broken;
   lock.unlock();
 
   // Unless the plan's next round has already announced itself in its place.
@@ -1328,7 +1360,7 @@ int main(int argc, char **argv) {
     write_file(dir + "/" + key + ".round", std::to_string(round) + "\n" + result.text("verdict") + "\n");
     remove_session(0);
   }
-  std::printf("%s\n", render(name, result).c_str());
+  std::printf("%s%s\n", render(name, result).c_str(), not_drawn(broken).c_str());
   std::fflush(stdout);
   return 0;
 }

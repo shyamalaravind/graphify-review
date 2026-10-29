@@ -78,8 +78,9 @@ sequenceDiagram
 ```
 
 - The agent runs one command and reads one block of text: `APPROVED`,
-  `APPROVED WITH NOTES`, `CHANGES REQUESTED` with numbered comments, or `ENDED`. Ports,
-  tabs and windows are the broker's business.
+  `APPROVED WITH NOTES`, `CHANGES REQUESTED` with numbered comments, or `ENDED`, then
+  any diagrams that didn't draw, with the parser's error. Ports, tabs and windows are the
+  broker's business.
 - The launcher is a shell script beside the SKILL.md. It builds to a temporary path and
   moves the binary into place, so a broker that's running is never overwritten.
 - The URL's path is a random 22-character token, so another local page can't read the
@@ -125,7 +126,8 @@ flowchart TD
   beside the target and renamed over it, so a viewer never reads half of it.
 - **`serve()`** (`graphify-review/review.cpp`): one request per connection. GETs serve the
   page, the session and Pele, the diagram renderer, which only a plan with diagrams
-  fetches; POSTs carry JSON, read by the broker's own small parser.
+  fetches; POSTs carry JSON, read by the broker's own small parser. `POST drawn` keeps
+  the diagrams the page couldn't draw, for `not_drawn()` to tell the agent.
 - **`finish()`** (`graphify-review/review.cpp`): the first verdict wins and wakes
   `main()`. A viewer that went away sets `set_leaving()` instead, which a reload clears.
 - **`render()`** (`graphify-review/review.cpp`): the verdict and each numbered comment,
@@ -190,12 +192,16 @@ flowchart TD
 - **`findNames()`** (`graphify-review/page.html`): wraps each name written in the plan
   format in a span carrying its key: in prose an HTML span, in a drawn box an SVG tspan.
 - **`describeNodes()`** (`graphify-review/page.html`): a list item that starts with a
-  box's name moves into that box, which is what turns these flowcharts into cards.
+  box's name moves into that box, which is what turns these flowcharts into cards. It
+  looks only between the diagram and the next diagram or heading (`entriesAfter()`), so
+  the plan's other bullets never land in a box.
 - **`frames()`** (`graphify-review/page.html`): the text before the first heading is the
-  intro card, and each section a frame.
+  intro card, and each section a frame, in one column that `arrange()` opens at the zoom
+  where the widest frame fits beside the panel.
 - **`drawDiagrams()`** (`graphify-review/page.html`): Pele (`pele.min.js`) draws each
   block as SVG, all of them here in under 10 ms, in the page's colours through its
-  `--pele-*` variables, so a change to dark mode needs no redraw.
+  `--pele-*` variables, so a change to dark mode needs no redraw. A block that won't parse
+  shows its source, and `host.drawn()` tells the broker.
 - **`shapeCards()`** (`graphify-review/page.html`): Pele centres every line, so a box with
   a description gets its title over a rule and its lines left-aligned under it.
 - **`resolveNames()`** (`graphify-review/page.html`): asks once for all names, with the

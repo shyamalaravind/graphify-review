@@ -1,14 +1,14 @@
 ---
 name: graphify-review
-description: Open the current plan (or any markdown file) as a canvas of diagrams in the browser, so the user can comment on its prose and its diagram nodes, then act on the feedback they send back. Writes a plan that changes code in the FORMAT.md shape first (a code-flow flowchart with a description entry per changed node). Use only when the user asks for it by name (e.g. /graphify-review, "graphify review", "graphify this plan"). A plain plan review, and the automatic review before leaving plan mode, belong to plan-review.
+description: Open the current plan, an explanation, or any markdown file as a canvas of diagrams in the browser, so the user can comment on its prose and its diagram nodes, then act on the feedback they send back. Writes it in the FORMAT.md canvas shape first (an intro with an overview diagram, one numbered frame per idea, the diagram that fits the logic, cards inside code boxes). Use only when the user asks for it by name (e.g. /graphify-review, "graphify review", "graphify this plan"). A plain plan review, and the automatic review before leaving plan mode, belong to plan-review.
 argument-hint: "[file.md]"
 ---
 
 # Graphify review
 
-The user wants to review a plan as a picture: one canvas in the browser, with
-the intro as a card, each `##` section a frame, and each flowchart box carrying its
-description inside it.
+The user wants to understand and review a plan, or any logic, as a picture: one canvas
+in the browser, with the intro as a card, each `##` section a frame, and each flowchart
+box carrying its description inside it.
 
 ## 0. In plan mode
 
@@ -17,11 +17,9 @@ plan-review's checkpoint in front of your host's native plan-approval gate (a to
 `exit_plan_mode`, or any equivalent "plan ready for review" card). Don't run plan-review
 as well:
 
-1. Reuse the plan file if your host already keeps one for this conversation —
-   don't rewrite it, beyond adding what the plan format asks for if it's
-   missing (step 1). Only write a fresh one (see step 1 below) if none
-   exists; that's a one-time cost, not a per-review cost, since the plan text
-   is already in context either way.
+1. Reuse the plan file if your host already keeps one for this conversation,
+   and rewrite it there in the canvas format (step 1), keeping every decision
+   and fact. Only write a fresh one (see step 1 below) if none exists.
 2. Open it with this skill (steps 1-2 below) and act on the feedback (step
    3). `CHANGES REQUESTED` or `ENDED` means don't invoke the native gate yet —
    revise the plan and try again, or stop and wait, per step 3's rules.
@@ -62,15 +60,20 @@ names don't count: `plan.md`, `untitled.md`, or a host's generated slug like
 - Keep the same name for every round of review in this session, so the user
   can tell it's the same plan.
 
-### Write it in the plan format
+### Write it as a canvas
 
-The user reviews a plan that changes code by its diagrams first, and follows
-its names into the code. Read [FORMAT.md](FORMAT.md), next to this file,
-before opening the review: a code-flow flowchart with new and changed nodes
-marked, a description entry per changed node that starts with the node's name,
-and functions and files written as `file: name()` or `path/to/file.ts:42-60`.
-If the plan lacks any of it, add it to the plan file, keeping the rest as it
-is. Plans that don't change code (a resume, a write-up) need none of it.
+The user reads the canvas by its diagrams first, and follows its names into
+the code. Read [FORMAT.md](FORMAT.md), next to this file, and write the file in
+its shape whatever it is: a plan that changes code, an explanation of code, or
+logic that isn't code. If you're asked to explain something and there's no
+file, write the explanation straight into one.
+
+Rewrite an existing plan into the shape rather than adding diagrams to it: keep
+every decision and fact, but say each once. Only a document that isn't logic (a
+resume, a letter) opens as it is.
+
+Before opening the review, check every diagram the way FORMAT.md's "Make sure it
+draws" says. The user sees a diagram that doesn't parse as raw source.
 
 ## 2. Open the review
 
@@ -122,4 +125,10 @@ Each comment says what it is about:
 - `On: "…"` quotes the plan's prose.
 - `On diagram 2, node "serve() GET session":` is about that node of the plan's
   second diagram; `On diagram 2: "…"` quotes other text in it, such as an edge
-  label.
+  label. Diagrams count from the top, the intro's included.
+
+Whatever the verdict, the result ends with `Diagrams that didn't draw:` if any
+didn't, each with its number and the parser's error. The user saw those as raw
+source. Fix them in the file: with your revision after `CHANGES REQUESTED`, and
+before going on after an approval. After `ENDED`, say so in your one line and
+leave the file as it is.
