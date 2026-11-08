@@ -27,7 +27,7 @@ flowchart LR
 
 - **The channel.** `review` is the broker: it holds one round of a plan's review, announces it, opens it in your browser, and prints the feedback when it comes back. Agents only ever run this command.
 - **The viewer.** One page, [`page.html`](skill/graphify-review/page.html), in a browser tab. It asks the broker which of the plan's names are in the code, and the broker answers from the code's text. Anything else that speaks the [session protocol](#session-protocol) can be a viewer too.
-- **The canvas format.** [`FORMAT.md`](skill/graphify-review/FORMAT.md): an intro with an overview diagram and the reading order, one numbered frame per idea, the kind of diagram that fits the logic (failure paths included), cards inside code boxes, and names written as `file: name()` or `path/file.ts:42-60`. The skill has the agent write plans and explanations this way.
+- **The canvas format.** [`FORMAT.md`](skill/graphify-review/FORMAT.md): the answer first, core frames then reference, the happy path then each failure path, headings that state each frame's conclusion, cards inside code boxes, and names written as `file: name()` or `path/file.ts:42-60`. Nothing the reader needs is left out, however long the canvas gets.
 
 ### The canvas
 
@@ -54,7 +54,7 @@ ln -s "$PWD/graphify-review/skill/graphify-review" ~/.codex/skills/graphify-revi
 ln -s "$PWD/graphify-review/skill/graphify-review" ~/.gemini/skills/graphify-review   # Gemini CLI
 ```
 
-Create the skills directory first if it doesn't exist. Requires a C++17 compiler — `clang++` from the Xcode command line tools on macOS (`xcode-select --install`), or `g++` on Linux. No packages, no runtime.
+Create the skills directory first if it doesn't exist. Requires a C++17 compiler — `clang++` from the Xcode command line tools on macOS (`xcode-select --install`), or `g++` on Linux. No packages, no runtime. The diagram check before a review opens uses Node when it's installed ([`scripts/check_diagrams.js`](skill/graphify-review/scripts/check_diagrams.js)); without it, the agent checks the diagrams by eye.
 
 The skill builds its binary on its first review (~1s); after that it starts in a few milliseconds. To build it ahead of time: `make -C skill/graphify-review`.
 
@@ -67,7 +67,7 @@ export PLAN_REVIEW_EDITOR=zed                # opens path:line
 
 Put these in `~/.zshenv` (or your shell's equivalent), not `~/.zshrc`. Agents run commands in non-interactive shells, and those skip `~/.zshrc`.
 
-You can also run it without an agent: `skill/graphify-review/review plan.md` prints the feedback to stdout. `--title` names the review (`review resume.md --title "Apollo.io Resume Senior Software Engineer"`), so another skill that hands its document over can ask for a title. `--root <dir>` is the code the plan is about; without it, it's the git repository `review` runs in.
+You can also run it without an agent: `skill/graphify-review/review plan.md` prints the feedback to stdout. `--title` names the review (`review resume.md --title "Apollo.io Resume Senior Software Engineer"`), so another skill that hands its document over can ask for a title. `--root <dir>` is the code the plan is about; without it, it's the git repository `review` runs in. `--comments <file.json>` puts an earlier round's comments back on the page, so a review can be picked up later: a JSON file shaped like the feedback a viewer sends, `{general, comments: [{note, anchor}]}`.
 
 ## Session protocol
 
@@ -83,7 +83,7 @@ The file goes when the round ends, and `<key>.round` beside it then holds the ro
 | Request | Does |
 | --- | --- |
 | `GET <url>` | the browser viewer |
-| `GET <url>session` | `{key, name, title, text, root, round}` |
+| `GET <url>session` | `{key, name, title, text, root, round, saved?}`, `saved` being the `--comments` file: an earlier round's `{general, comments}` |
 | `GET <url>pele.min.js` | the diagram renderer, for a page that has diagrams |
 | `POST <url>feedback` | `{verdict, general, comments: [{note, anchor}]}`, where `verdict` is `approve`, `changes` or `end` |
 | `POST <url>resolve` | `{keys, files}` → which of the names exist in the code, as `[true, false, …]`; a key is `{file?, name?, line?, end?}`, and `files` are the ones the plan mentions, searched first |
@@ -101,6 +101,7 @@ The broker answers only requests addressed to `127.0.0.1:<port>` (the `Host` hea
 - `skill/graphify-review/`: the skill.
   - `SKILL.md`: instructions the agent follows.
   - `FORMAT.md`: the canvas format.
+  - `scripts/check_diagrams.js`: the check before a review opens. It draws each of a file's diagrams with the page's own `marked.min.js` and `pele.min.js` under Node, and lists any that don't draw with the file line of the error.
   - `review`: launcher. Compiles the broker on first use (or after `review.cpp` changes) into `bin/review`, then runs it.
   - `review.cpp`: the broker — C++17, standard library and POSIX sockets only.
   - `page.html`: the canvas page.

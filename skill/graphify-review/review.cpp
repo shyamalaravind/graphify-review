@@ -1014,7 +1014,8 @@ static void set_leaving(bool leaving) {
 // The session protocol, under a random path prefix so other local pages can't read the
 // plan or post fake feedback:
 //   GET  <base>                the browser viewer
-//   GET  <base>session         {key, name, title, text, root, round}
+//   GET  <base>session         {key, name, title, text, root, round, saved?}, saved being
+//                               --comments: an earlier round's {general, comments}
 //   GET  <base>pele.min.js     for a viewer whose plan has diagrams
 //   POST <base>feedback        {verdict: approve | changes | end, leaving?, general,
 //                               comments: [{note, anchor: {kind, ...}}]}
@@ -1216,7 +1217,9 @@ static bool open_browser(const std::string &url) {
 int main(int argc, char **argv) {
   // --title names the review; without it, the file's name does.
   // --root is the code the plan is about; without it, the git repository it runs in.
-  std::string file, title, root;
+  // --comments puts an earlier round's comments back on the page: a JSON file shaped like
+  // the feedback a viewer sends, {general, comments: [{note, anchor}]}.
+  std::string file, title, root, saved_path;
   bool usage_ok = true;
   for (int k = 1; k < argc && usage_ok; k++) {
     std::string arg = argv[k];
@@ -1224,13 +1227,15 @@ int main(int argc, char **argv) {
       title = argv[++k];
     else if (arg == "--root" && k + 1 < argc)
       root = argv[++k];
+    else if (arg == "--comments" && k + 1 < argc)
+      saved_path = argv[++k];
     else if (file.empty() && arg.rfind("--", 0) != 0)
       file = arg;
     else
       usage_ok = false;
   }
   if (!usage_ok || file.empty()) {
-    std::fprintf(stderr, "usage: review <file.md> [--title <title>] [--root <dir>]\n");
+    std::fprintf(stderr, "usage: review <file.md> [--title <title>] [--root <dir>] [--comments <file.json>]\n");
     return 2;
   }
 
@@ -1238,6 +1243,14 @@ int main(int argc, char **argv) {
   if (!read_file(file, plan)) {
     std::fprintf(stderr, "review: cannot read %s\n", file.c_str());
     return 1;
+  }
+  std::string saved;
+  if (!saved_path.empty()) {
+    JVal check;
+    if (!read_file(saved_path, saved) || !parse_json(saved, check) || check.type != JVal::Obj) {
+      std::fprintf(stderr, "review: %s is not a JSON object of comments\n", saved_path.c_str());
+      return 1;
+    }
   }
   std::string name = base_of(file), key = session_key(name);
   std::string code_root = find_root(root);
@@ -1297,7 +1310,8 @@ int main(int argc, char **argv) {
   std::string session = "{\"key\":" + json_string(key) + ",\"name\":" + json_string(name) +
                         ",\"title\":" + json_string(title) + ",\"text\":" + json_string(plan) +
                         ",\"root\":" + json_string(code_root) +
-                        ",\"round\":" + std::to_string(round) + "}";
+                        ",\"round\":" + std::to_string(round) +
+                        (saved.empty() ? "" : ",\"saved\":" + trim(saved)) + "}";
   // What a viewer needs to attach: where the broker is, and where the viewer files are.
   std::string announce = "{\"key\":" + json_string(key) + ",\"name\":" + json_string(name) +
                          ",\"title\":" + json_string(title) + ",\"url\":" + json_string(url) +

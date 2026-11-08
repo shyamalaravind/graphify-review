@@ -225,6 +225,7 @@ async function show(session) {
   for (const d of diagrams) if (d.drawn) { findNames(d.el); wrapLiterals(d); shapeCards(d); }
   arrange();
   resolveNames();
+  if (session.saved) restore(session.saved);
 }
 
 // The plan's sections become frames: the text before the first ## is the intro, and each
@@ -718,6 +719,40 @@ function addComment(anchor, range, el = null) {
   $('#empty').hidden = true;
   $('#note').textContent = '';
   c.note.focus();
+  return c;
+}
+
+// ---- An earlier round's comments (review --comments), put back on what they were about.
+// A quote is found with its whitespace ignored, since a selection across paragraphs or
+// table cells reads differently from the text it spans.
+function findQuote(quote) {
+  const walk = document.createTreeWalker(world, NodeFilter.SHOW_TEXT), at = [];
+  let flat = '';
+  for (let n; (n = walk.nextNode());) {
+    if (n.parentElement.closest('.diagram')) continue;
+    for (let i = 0; i < n.data.length; i++) if (!/\s/.test(n.data[i])) { flat += n.data[i]; at.push([n, i]); }
+  }
+  const want = (quote || '').replace(/\s+/g, ''), i = want ? flat.indexOf(want) : -1;
+  if (i < 0) return null;
+  const range = document.createRange(), [sn, so] = at[i], [en, eo] = at[i + want.length - 1];
+  range.setStart(sn, so);
+  range.setEnd(en, eo + 1);
+  return range;
+}
+function restore(saved) {
+  for (const { note, anchor } of saved.comments || []) {
+    if (!anchor || !note) continue;
+    let range = null, el = null;
+    if (anchor.kind === 'diagram') {
+      const d = diagrams[anchor.diagram - 1];
+      el = (anchor.node && d && [...d.el.querySelectorAll('.pele-node')].find(g => nodeTitle(g) === anchor.node)) || d?.el || world;
+    } else if (anchor.kind !== 'code') {
+      range = findQuote(anchor.quote);
+      if (!range) el = world;  // the text has changed since: the comment stays, unplaced
+    }
+    addComment(anchor, range, el).note.value = note;
+  }
+  $('#general').value = saved.general || '';
 }
 
 // ---- Sending: approve, request changes, or end with nothing.
